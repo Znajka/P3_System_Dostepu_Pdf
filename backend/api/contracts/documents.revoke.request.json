@@ -1,0 +1,4 @@
+{
+  "granteeUserId": "string", // or "grantId": "string" (one required)
+  "reason": "string (optional)"
+}
