@@ -1,0 +1,10 @@
+{
+  "documentId": "string (optional)",
+  "userId": "string (optional)",
+  "action": "string (optional)", // upload, grant, revoke, open_attempt, stream_start, stream_end
+  "result": "string (optional)", // success, failure
+  "from": "2026-04-01T00:00:00Z (optional)",
+  "to": "2026-04-30T23:59:59Z (optional)",
+  "limit": 100,
+  "offset": 0
+}

@@ -1,0 +1,7 @@
+{
+  "documentId": "string",
+  "granteeUserId": "string",
+  "revokedBy": "string",
+  "revokedAt": "2026-04-26T12:02:00Z",
+  "status": "revoked"
+}

@@ -1,0 +1,11 @@
+{
+  "documentId": "string",
+  "title": "string",
+  "ownerId": "string",
+  "createdAt": "2026-04-26T12:00:00Z",
+  "accessible": true,
+  "access": {
+    "granteeUserId": "string",
+    "expiresAt": "2026-05-01T00:00:00Z"
+  }
+}
