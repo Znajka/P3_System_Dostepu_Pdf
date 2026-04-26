@@ -1,0 +1,191 @@
+version: '3.9'
+
+services:
+  # PostgreSQL database (primary data store)
+  postgres:
+    image: postgres:16-alpine
+    container_name: p3-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-p3_system_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error - POSTGRES_PASSWORD required}
+      POSTGRES_INITDB_ARGS: "-c timezone=UTC"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init/:/docker-entrypoint-initdb.d/:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - p3-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Spring Boot backend (auth, API, metadata, DEK management)
+  spring-boot-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.springboot
+      args:
+        JAVA_VERSION: 21
+    container_name: p3-spring-boot
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-p3_system_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?error - POSTGRES_PASSWORD required}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_DDL_AUTO:-validate}
+      SPRING_JPA_PROPERTIES_HIBERNATE_JDBC_BATCH_SIZE: 20
+      SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_INSERTS: 'true'
+      SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_UPDATES: 'true'
+      # Security & JWT
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?error - APP_JWT_SECRET required}
+      APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-3600000}
+      APP_REFRESH_TOKEN_EXPIRATION_MS: ${APP_REFRESH_TOKEN_EXPIRATION_MS:-604800000}
+      # KMS (Key Management Service) - envelope encryption for DEKs
+      KMS_PROVIDER: ${KMS_PROVIDER:-vault}
+      KMS_ENDPOINT: ${KMS_ENDPOINT:-http://vault:8200}
+      KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:?error - KMS_AUTH_TOKEN required}
+      # FastAPI microservice mTLS/service-to-service
+      FASTAPI_SERVICE_URL: https://fastapi-pdf-service:8443
+      FASTAPI_MTLS_CERT: /etc/p3/certs/spring-boot.crt
+      FASTAPI_MTLS_KEY: /etc/p3/certs/spring-boot.key
+      FASTAPI_MTLS_CA: /etc/p3/certs/ca.crt
+      # Security: rate-limiting, lockout
+      APP_RATE_LIMIT_ENABLED: 'true'
+      APP_RATE_LIMIT_FAILED_ATTEMPTS: ${APP_RATE_LIMIT_FAILED_ATTEMPTS:-5}
+      APP_RATE_LIMIT_WINDOW_MINUTES: ${APP_RATE_LIMIT_WINDOW_MINUTES:-15}
+      APP_RATE_LIMIT_LOCKOUT_MINUTES: ${APP_RATE_LIMIT_LOCKOUT_MINUTES:-30}
+      # PDF/document storage (local or S3)
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_LOCAL_PATH: /data/encrypted-documents
+      # Logging & auditing
+      APP_LOGGING_LEVEL: ${APP_LOGGING_LEVEL:-INFO}
+      APP_AUDIT_LOG_ENABLED: 'true'
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./backend/pom.xml:/app/pom.xml:ro
+      - ./backend/db/migrations:/app/migrations:ro
+      - /data/encrypted-documents:/data/encrypted-documents
+      - ./certs:/etc/p3/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault:
+        condition: service_started
+    networks:
+      - p3-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # FastAPI PDF microservice (AES-256 encryption/decryption + streaming)
+  fastapi-pdf-service:
+    build:
+      context: ./backend/pdf-microservice
+      dockerfile: Dockerfile.fastapi
+      args:
+        PYTHON_VERSION: 3.12
+    container_name: p3-fastapi-pdf
+    environment:
+      PYTHONUNBUFFERED: '1'
+      FASTAPI_ENV: ${FASTAPI_ENV:-docker}
+      # Microservice identity & mTLS
+      FASTAPI_MTLS_CERT: /etc/p3/certs/fastapi.crt
+      FASTAPI_MTLS_KEY: /etc/p3/certs/fastapi.key
+      FASTAPI_MTLS_CA: /etc/p3/certs/ca.crt
+      # Spring Boot backend URL (for DEK requests)
+      SPRING_BOOT_SERVICE_URL: https://spring-boot-backend:8080
+      SPRING_BOOT_MTLS_CERT: /etc/p3/certs/fastapi.crt
+      SPRING_BOOT_MTLS_KEY: /etc/p3/certs/fastapi.key
+      SPRING_BOOT_MTLS_CA: /etc/p3/certs/ca.crt
+      # KMS endpoint
+      KMS_PROVIDER: ${KMS_PROVIDER:-vault}
+      KMS_ENDPOINT: ${KMS_ENDPOINT:-http://vault:8200}
+      KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:?error - KMS_AUTH_TOKEN required}
+      # Storage
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_LOCAL_PATH: /data/encrypted-documents
+      # Security
+      FASTAPI_LOGGING_LEVEL: ${FASTAPI_LOGGING_LEVEL:-INFO}
+      FASTAPI_WORKERS: ${FASTAPI_WORKERS:-4}
+      FASTAPI_STREAM_CHUNK_SIZE: ${FASTAPI_STREAM_CHUNK_SIZE:-65536}
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./backend/pdf-microservice/app:/app/app:ro
+      - ./backend/pdf-microservice/requirements.txt:/app/requirements.txt:ro
+      - /data/encrypted-documents:/data/encrypted-documents:ro
+      - ./certs:/etc/p3/certs:ro
+    depends_on:
+      - spring-boot-backend
+      - vault
+    networks:
+      - p3-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # HashiCorp Vault (KMS for master key storage and DEK envelope encryption)
+  vault:
+    image: vault:latest
+    container_name: p3-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_ROOT_TOKEN:?error - VAULT_ROOT_TOKEN required}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    volumes:
+      - vault_data:/vault/file
+      - ./backend/vault/init:/vault/config:ro
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - p3-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: pgAdmin for database inspection (dev only, disable in production)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: p3-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@p3.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?error - PGADMIN_PASSWORD required}
+    ports:
+      - "5050:80"
+    networks:
+      - p3-network
+    profiles:
+      - dev
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  vault_data:
+    driver: local
+
+networks:
+  p3-network:
+    driver: bridge
