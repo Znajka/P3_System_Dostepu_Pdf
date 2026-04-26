@@ -1,11 +1,11 @@
 The 20-Step Prompt Roadmap
 ####################################
-Phase 1: Foundation & Database
-Prompt: "Act as a Lead Architect. Define a docker-compose.yml for a Spring Boot (Java 21), FastAPI (Python 3.12), and PostgreSQL environment."
+(done by RJ)Phase 1: Foundation & Database
+(done by RJ)Prompt: "Act as a Lead Architect. Define a docker-compose.yml for a Spring Boot (Java 21), FastAPI (Python 3.12), and PostgreSQL environment."
 
-Prompt: "Generate the SQL schema for tables: USER, DOCUMENT, DOCUMENT_KEY_METADATA, ACCESS_GRANT, ACCESS_EVENT_LOG, and SESSION_TOKEN based on the provided requirements."
+(done by RJ)Prompt: "Generate the SQL schema for tables: USER, DOCUMENT, DOCUMENT_KEY_METADATA, ACCESS_GRANT, ACCESS_EVENT_LOG, and SESSION_TOKEN based on the provided requirements."
 
-Prompt: "Create the Spring Boot JPA Entities for these tables, ensuring correct relationships (e.g., One-to-Many for User to AccessGrants)."
+(done by RJ)Prompt: "Create the Spring Boot JPA Entities for these tables, ensuring correct relationships (e.g., One-to-Many for User to AccessGrants)."
 
 
 
