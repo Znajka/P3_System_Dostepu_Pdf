@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/${POSTGRES_DB:p3_system_db}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD}
+
+storage:
+  type: ${STORAGE_TYPE:local}
+  local:
+    path: /data/encrypted-documents
+
+fastapi:
+  service:
+    url: ${FASTAPI_SERVICE_URL:https://fastapi-pdf-service:8443}
+    mtls:
+      cert: ${FASTAPI_MTLS_CERT:/etc/p3/certs/spring-boot.crt}
+      key: ${FASTAPI_MTLS_KEY:/etc/p3/certs/spring-boot.key}
+      ca: ${FASTAPI_MTLS_CA:/etc/p3/certs/ca.crt}
