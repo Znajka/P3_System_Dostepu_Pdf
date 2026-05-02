@@ -1,0 +1,20 @@
+# FastAPI PDF Microservice Configuration
+encryption:
+  algorithm: AES-256-GCM
+  key_size: 256  # bits
+  nonce_size: 96  # bits
+  tag_size: 128  # bits
+
+storage:
+  type: local  # local, s3, gcs
+  local_path: /data/encrypted-documents
+
+streaming:
+  chunk_size: 65536  # 64KB
+  max_stream_size: 104857600  # 100MB
+
+security:
+  verify_ssl: true
+  mtls_cert: /etc/p3/certs/fastapi.crt
+  mtls_key: /etc/p3/certs/fastapi.key
+  mtls_ca: /etc/p3/certs/ca.crt
