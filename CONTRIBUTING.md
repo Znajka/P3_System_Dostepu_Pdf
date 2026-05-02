@@ -5,12 +5,12 @@ This document defines project-level conventions, security requirements, and cont
 
 ## Repository layout
 This repository uses an explicit frontend/backend layout. Contributors must place files in the following locations:
-- `backend/` — server-side code, API implementations, and API contract files.
-  - `backend/api/contracts/` — canonical OpenAPI/contract JSON files used by backend and client codegen.
-  - `backend/src/` — Spring Boot and related backend source code.
-- `frontend/` — client-side code, UI and PDF.js integration.
-  - `frontend/src/` — frontend application sources and PDF.js integration.
-  - `frontend/public/` — static assets (no direct PDF blobs).
+- `backend/` ï¿½ server-side code, API implementations, and API contract files.
+  - `backend/api/contracts/` ï¿½ canonical OpenAPI/contract JSON files used by backend and client codegen.
+  - `backend/src/` ï¿½ Spring Boot and related backend source code.
+- `frontend/` ï¿½ client-side code, UI and PDF.js integration.
+  - `frontend/src/` ï¿½ frontend application sources and PDF.js integration.
+  - `frontend/public/` ï¿½ static assets (no direct PDF blobs).
 
 Place API contracts and server-side contract JSON files in `backend/api/contracts`.
 Do NOT place secrets, raw keys, or encrypted DEKs in the frontend folder.
