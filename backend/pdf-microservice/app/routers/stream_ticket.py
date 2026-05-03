@@ -7,9 +7,9 @@ import logging
 import base64
 import os
 from typing import Optional
-from fastapi import APIRouter, Path, HTTPException, Query, Header
+import httpx
+from fastapi import APIRouter, Path, HTTPException, Query, Header, Request
 from fastapi.responses import StreamingResponse
-import asyncio
 
 from app.security.jwt_validator import JwtValidator
 from app.services.streaming_service import StreamingService
@@ -40,8 +40,57 @@ def get_streaming_service() -> StreamingService:
     return _streaming_service
 
 
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for") or request.headers.get(
+        "X-Forwarded-For"
+    )
+    if xff:
+        return xff.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "127.0.0.1"
+
+
+async def _mark_ticket_used_spring(nonce: str, user_id: str) -> None:
+    base = os.getenv(
+        "SPRING_BOOT_SERVICE_URL", "http://spring-boot-backend:8080"
+    ).rstrip("/")
+    key = os.getenv("APP_INTERNAL_API_KEY", "")
+    if not key:
+        logger.error("APP_INTERNAL_API_KEY not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Ticket replay protection not configured (internal API key)",
+        )
+    url = f"{base}/api/internal/tickets/mark-used"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            url,
+            json={"nonce": nonce, "userId": user_id},
+            headers={"X-Internal-Api-Key": key},
+        )
+    if response.status_code == 401:
+        raise HTTPException(
+            status_code=503, detail="Internal ticket API authentication failed"
+        )
+    if response.status_code == 409:
+        raise HTTPException(
+            status_code=403, detail="Ticket already used, expired, or invalid"
+        )
+    if response.status_code not in (200, 204):
+        logger.error(
+            "mark-used failed: status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+        raise HTTPException(
+            status_code=503, detail="Ticket validation service unavailable"
+        )
+
+
 @router.get("/{ticket}", summary="Stream decrypted PDF via ticket")
 async def stream_decrypted_pdf_via_ticket(
+    request: Request,
     ticket: str = Path(..., description="Open-ticket JWT"),
     chunk_size: int = Query(
         default=65536,
@@ -110,42 +159,26 @@ async def stream_decrypted_pdf_via_ticket(
 
     try:
         logger.info("Stream request via ticket: ticket=%s...", ticket[:50])
+        ip = _client_ip(request)
 
-        # Step 1: Validate JWT ticket
         try:
-            payload = jwt_validator.validate_open_ticket(ticket)
+            payload = jwt_validator.validate_stream_ticket(ticket, ip)
         except Exception as e:
             logger.warning("Ticket validation failed: %s", str(e))
             raise HTTPException(status_code=401, detail=f"Invalid ticket: {str(e)}")
 
-        # Step 2: Extract claims
-        user_id = payload.get("sub")
-        document_id = payload.get("doc")
-        ticket_nonce = payload.get("jti")
+        user_id = str(payload.get("sub"))
+        document_id = str(payload.get("doc"))
+        ticket_nonce = str(payload.get("jti"))
 
-        if not all([user_id, document_id, ticket_nonce]):
-            logger.error("Missing required claims in ticket")
-            raise HTTPException(
-                status_code=400, detail="Invalid ticket: missing required claims"
-            )
+        await _mark_ticket_used_spring(ticket_nonce, user_id)
 
         logger.info(
-            "Ticket validated: user=%s, document=%s, nonce=%s",
+            "Ticket validated and consumed: user=%s, document=%s, nonce=%s",
             user_id, document_id, ticket_nonce
         )
 
-        # Step 3: Validate audience (optional check for streaming endpoint)
-        # Note: For client streaming, aud should be "pdf-microservice" or client-specific
-        aud = payload.get("aud")
-        if aud and aud != "pdf-microservice":
-            logger.warning("Invalid audience for streaming: %s", aud)
-            raise HTTPException(status_code=401, detail="Invalid ticket audience")
-
-        # Step 4: Check ticket nonce hasn't been used (replay prevention)
-        # TODO: Query Spring Boot to verify nonce is not yet marked as used
-        logger.debug("Checking ticket nonce for replay: %s", ticket_nonce)
-
-        # Step 5: Retrieve encrypted blob from storage
+        # Retrieve encrypted blob from storage
         blob_filename = f"{document_id}.pdf.enc"
         blob_path = os.path.join(storage_path, blob_filename)
 

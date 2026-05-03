@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class JwtValidator:
     """
     Validates JWT tokens issued by Spring Boot with IP-pinning support.
-    - Algorithm: HS512 (HMAC + SHA-512)
+    - Algorithms: HS256 (Spring default) and HS512 (legacy tests)
     - Claims: sub (user_id), doc (document_id), aud (pdf-microservice),
       jti (ticket_id), ip (client IP), exp (expiration), iat (issued_at)
     """
@@ -44,7 +44,7 @@ class JwtValidator:
         self.secret_key = secret_key or os.getenv(
             "APP_JWT_SECRET", "change-me-in-production"
         )
-        self.algorithm = "HS512"
+        self.algorithms = ["HS256", "HS512"]
         self.ip_pinning_enabled = os.getenv("APP_SECURITY_IP_PINNING_ENABLED", "true").lower() == "true"
 
         if not self.secret_key or self.secret_key == "change-me-in-production":
@@ -124,6 +124,53 @@ class JwtValidator:
             logger.error("Open-ticket validation failed: %s", str(e))
             raise
 
+    def validate_open_ticket(
+        self,
+        token: str,
+        expected_document_id: Optional[str] = None,
+        expected_user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Validate streaming ticket claims (signature + aud + required claims).
+        Does not enforce IP pinning (use validate_stream_ticket from the edge).
+        """
+        payload = self._validate_token(token)
+        required_claims = ["sub", "doc", "aud", "jti", "exp", "iat"]
+        for claim in required_claims:
+            if claim not in payload:
+                raise ValueError(f"Missing required claim: {claim}")
+        if payload.get("aud") != "pdf-microservice":
+            raise ValueError("Invalid audience")
+        if expected_document_id is not None and payload.get(
+            "doc"
+        ) != expected_document_id:
+            raise ValueError("Document ID mismatch")
+        if expected_user_id is not None and payload.get(
+            "sub"
+        ) != expected_user_id:
+            raise ValueError("User ID mismatch")
+        return payload
+
+    def validate_stream_ticket(self, token: str, client_ip: str) -> Dict[str, Any]:
+        """Validate ticket for browser streaming (includes IP pinning when enabled)."""
+        payload = self.validate_open_ticket(token)
+        self._validate_ip_pinning(payload, client_ip or "")
+        return payload
+
+    def extract_user_id(self, token: str) -> str:
+        payload = self._validate_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise ValueError("Missing sub claim")
+        return str(sub)
+
+    def extract_jti(self, token: str) -> str:
+        payload = self._validate_token(token)
+        jti = payload.get("jti")
+        if not jti:
+            raise ValueError("Missing jti claim")
+        return str(jti)
+
     def _validate_token(self, token: str) -> Dict[str, Any]:
         """
         Validate JWT token and extract claims.
@@ -133,7 +180,7 @@ class JwtValidator:
         """
         try:
             payload = jwt.decode(
-                token, self.secret_key, algorithms=[self.algorithm]
+                token, self.secret_key, algorithms=self.algorithms
             )
             logger.debug("Token validated successfully for user: %s", payload.get("sub"))
             return payload

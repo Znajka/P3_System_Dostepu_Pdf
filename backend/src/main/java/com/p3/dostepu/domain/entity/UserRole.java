@@ -1,11 +1,10 @@
 package com.p3.dostepu.domain.entity;
 
 /**
- * User role enumeration: ADMIN (full access), OWNER (owns documents),
- * USER (basic user with grants).
+ * Global user roles: ADMIN (full access), USER (default).
+ * Document ownership is stored on {@link Document#getOwner()}, not as a role.
  */
 public enum UserRole {
   ADMIN,
-  OWNER,
   USER
 }

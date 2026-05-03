@@ -11,20 +11,17 @@ import com.p3.dostepu.domain.entity.UserRole;
 import com.p3.dostepu.security.CustomUserDetails;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.SignatureException;
-import io.jsonwebtoken.UnsupportedJwtException;
+import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * JWT token provider: issues, validates, and extracts claims from JWT tokens.
- * Updated to support IP-pinning for enhanced security.
- * Per CONTRIBUTING.md: API authentication tokens must have expiration and be revocable.
  */
 @Slf4j
 @Component
 public class JwtProvider {
+  private static final SignatureAlgorithm JWT_ALGO = SignatureAlgorithm.HS256;
 
   @Value("${app.jwt.secret:}")
   private String jwtSecret;
@@ -52,12 +49,12 @@ public class JwtProvider {
     Date expiryDate = new Date(now.getTime() + jwtExpirationMs);
 
     return Jwts.builder()
-        .setSubject(userPrincipal.getUserId().toString())
+        .subject(userPrincipal.getUserId().toString())
         .claim("roles", roles)
         .claim("username", userPrincipal.getUsername())
-        .setIssuedAt(now)
-        .setExpiration(expiryDate)
-        .signWith(SignatureAlgorithm.HS512, jwtSecret.getBytes(StandardCharsets.UTF_8))
+        .issuedAt(now)
+        .expiration(expiryDate)
+        .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)), JWT_ALGO)
         .compact();
   }
 
@@ -69,23 +66,17 @@ public class JwtProvider {
     Date expiryDate = new Date(now.getTime() + refreshTokenExpirationMs);
 
     return Jwts.builder()
-        .setSubject(userId)
+        .subject(userId)
         .claim("username", username)
         .claim("type", "refresh")
-        .setIssuedAt(now)
-        .setExpiration(expiryDate)
-        .signWith(SignatureAlgorithm.HS512, jwtSecret.getBytes(StandardCharsets.UTF_8))
+        .issuedAt(now)
+        .expiration(expiryDate)
+        .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)), JWT_ALGO)
         .compact();
   }
 
   /**
    * Generate single-use document access ticket with IP pinning.
-   * Per API contract: ticket for /documents/{id}/open-ticket endpoint.
-   *
-   * Updated: includes IP address claim for IP-pinning security.
-   * - ip: client IP address (pinned to this IP)
-   * - aud: pdf-microservice (audience)
-   * - scopes: open:document
    *
    * @param userId user UUID
    * @param documentId document UUID
@@ -105,23 +96,22 @@ public class JwtProvider {
     Date expiryDate = new Date(now.getTime() + (ttlSeconds * 1000L));
 
     String ticket = Jwts.builder()
-        .setSubject(userId)
+        .subject(userId)
         .claim("doc", documentId)
         .claim("aud", "pdf-microservice")
         .claim("jti", nonce)
         .claim("nonce", nonce)
         .claim("scopes", "open:document")
-        .claim("ip", clientIp) // IP-pinning claim
+        .claim("ip", clientIp)
         .claim("ip_pinning_enabled", ipPinningEnabled)
-        .setIssuedAt(now)
-        .setExpiration(expiryDate)
-        .signWith(SignatureAlgorithm.HS512, jwtSecret.getBytes(StandardCharsets.UTF_8))
+        .issuedAt(now)
+        .expiration(expiryDate)
+        .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)), JWT_ALGO)
         .compact();
 
-    logger.info(
-        "Generated document access ticket: userId={}, documentId={}, nonce={}, "
-            + "clientIp={}, ttlSeconds={}, ipPinningEnabled={}",
-        userId, documentId, nonce, clientIp, ttlSeconds, ipPinningEnabled
+    log.info(
+        "Generated document access ticket: userId={}, documentId={}, nonce={}, clientIp={}",
+        userId, documentId, nonce, clientIp
     );
 
     return ticket;
@@ -133,17 +123,12 @@ public class JwtProvider {
   public boolean validateToken(String authToken) {
     try {
       Jwts.parser()
-          .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
-          .parseClaimsJws(authToken);
+          .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+          .build()
+          .parseSignedClaims(authToken);
       return true;
-    } catch (SignatureException e) {
-      log.error("Invalid JWT signature: {}", e.getMessage());
-    } catch (MalformedJwtException e) {
+    } catch (Exception e) {
       log.error("Invalid JWT token: {}", e.getMessage());
-    } catch (UnsupportedJwtException e) {
-      log.error("Unsupported JWT token: {}", e.getMessage());
-    } catch (IllegalArgumentException e) {
-      log.error("JWT claims string is empty: {}", e.getMessage());
     }
     return false;
   }
@@ -153,9 +138,10 @@ public class JwtProvider {
    */
   public String getUserIdFromJwt(String token) {
     Claims claims = Jwts.parser()
-        .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
-        .parseClaimsJws(token)
-        .getBody();
+        .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+        .build()
+        .parseSignedClaims(token)
+        .getPayload();
     return claims.getSubject();
   }
 
@@ -164,9 +150,10 @@ public class JwtProvider {
    */
   public Set<UserRole> getRolesFromJwt(String token) {
     Claims claims = Jwts.parser()
-        .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
-        .parseClaimsJws(token)
-        .getBody();
+        .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+        .build()
+        .parseSignedClaims(token)
+        .getPayload();
     String rolesStr = claims.get("roles", String.class);
     if (rolesStr == null || rolesStr.isEmpty()) {
       return Set.of();
@@ -179,16 +166,14 @@ public class JwtProvider {
 
   /**
    * Extract IP address from JWT token (for IP-pinning validation).
-   *
-   * @param token JWT token
-   * @return IP address embedded in token (or null if not present)
    */
   public String getIpAddressFromJwt(String token) {
     try {
       Claims claims = Jwts.parser()
-          .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
-          .parseClaimsJws(token)
-          .getBody();
+          .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+          .build()
+          .parseSignedClaims(token)
+          .getPayload();
       return claims.get("ip", String.class);
     } catch (Exception e) {
       log.debug("Failed to extract IP from token: {}", e.getMessage());
@@ -202,9 +187,10 @@ public class JwtProvider {
   public boolean isIpPinningEnabledInToken(String token) {
     try {
       Claims claims = Jwts.parser()
-          .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
-          .parseClaimsJws(token)
-          .getBody();
+          .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+          .build()
+          .parseSignedClaims(token)
+          .getPayload();
       Boolean enabled = claims.get("ip_pinning_enabled", Boolean.class);
       return enabled != null && enabled;
     } catch (Exception e) {
@@ -217,9 +203,10 @@ public class JwtProvider {
    */
   public Date getExpirationDateFromJwt(String token) {
     Claims claims = Jwts.parser()
-        .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
-        .parseClaimsJws(token)
-        .getBody();
+        .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+        .build()
+        .parseSignedClaims(token)
+        .getPayload();
     return claims.getExpiration();
   }
 

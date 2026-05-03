@@ -66,7 +66,7 @@ class E2EAccessGrantTicketTest {
   void setUp() {
     // Create users
     adminUser = createUser("admin", "admin@example.com", Set.of(UserRole.ADMIN));
-    ownerUser = createUser("owner", "owner@example.com", Set.of(UserRole.OWNER));
+    ownerUser = createUser("owner", "owner@example.com", Set.of(UserRole.USER));
     authorizedUser = createUser("authorized", "authorized@example.com",
         Set.of(UserRole.USER));
     unauthorizedUser = createUser("unauthorized", "unauthorized@example.com",

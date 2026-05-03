@@ -1,28 +1,29 @@
 package com.p3.dostepu.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Getter;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 /**
- * DTO for POST /documents/{id}/revoke request.
- * Per API contract: granteeUserId (required), optional reason.
+ * Request DTO for revoking document access.
+ * Provide exactly one of: granteeUserId, granteeUsername, granteeEmail.
  */
-@Getter
-@Setter
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class AccessRevokeRequest {
 
-  @NotBlank
   @JsonProperty("granteeUserId")
   private String granteeUserId;
 
-  @JsonProperty("reason")
+  @JsonProperty("granteeUsername")
+  private String granteeUsername;
+
+  @JsonProperty("granteeEmail")
+  private String granteeEmail;
+
   private String reason;
-}
+}	

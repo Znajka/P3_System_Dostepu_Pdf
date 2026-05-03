@@ -75,6 +75,7 @@ coverage/
 # DATABASE FILES
 ############################
 *.sql
+!backend/db/init/*.sql
 *.dump
 *.bak
 

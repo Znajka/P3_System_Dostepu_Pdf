@@ -24,10 +24,5 @@ ENV FASTAPI_WORKERS=${FASTAPI_WORKERS:-4}
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8443/health')" || exit 1
 
-# Run FastAPI with Uvicorn
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8443", \
-     "--ssl-certfile", "/etc/p3/certs/fastapi.crt", \
-     "--ssl-keyfile", "/etc/p3/certs/fastapi.key", \
-     "--workers", "${FASTAPI_WORKERS}"]
+# Run FastAPI with Uvicorn (dev mode: HTTP, no TLS cert files required)
+CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8443 --workers ${FASTAPI_WORKERS:-4}"

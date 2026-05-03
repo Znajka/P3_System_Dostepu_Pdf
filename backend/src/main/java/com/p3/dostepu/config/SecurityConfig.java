@@ -24,8 +24,7 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Security configuration: JWT-based authentication, Bcrypt password hashing,
- * and role-based access control (ADMIN, USER, OWNER). Per CONTRIBUTING.md
- * Security Requirements and API Design.
+ * and role-based access control (ADMIN, USER). Document ownership is enforced in services.
  */
 @Configuration
 @EnableWebSecurity
@@ -106,24 +105,29 @@ public class SecurityConfig {
             .requestMatchers("/", "/api/auth/login", "/api/auth/register",
                 "/api/auth/refresh").permitAll()
             .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-            .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+            .requestMatchers("/swagger-ui.html", "/swagger-ui/**").permitAll()
+            .requestMatchers("/v3/**").permitAll()
             // Admin-only endpoints
             .requestMatchers(HttpMethod.GET, "/api/logs/access-events")
                 .hasRole("ADMIN")
-            // Document endpoints: owner/admin can create/grant/revoke
+            // Document endpoints: authenticated users; service enforces document owner for grant/revoke
+            .requestMatchers(HttpMethod.GET, "/api/documents")
+                .hasAnyRole("ADMIN", "USER")
             .requestMatchers(HttpMethod.POST, "/api/documents")
-                .hasAnyRole("ADMIN", "OWNER", "USER")
+                .hasAnyRole("ADMIN", "USER")
             .requestMatchers(HttpMethod.POST, "/api/documents/*/grant")
-                .hasAnyRole("ADMIN", "OWNER")
+                .hasAnyRole("ADMIN", "USER")
             .requestMatchers(HttpMethod.POST, "/api/documents/*/revoke")
-                .hasAnyRole("ADMIN", "OWNER")
+                .hasAnyRole("ADMIN", "USER")
+            .requestMatchers(HttpMethod.GET, "/api/internal/documents/*/encryption-metadata")
+                .hasAnyRole("ADMIN", "USER")
             // Document access: any authenticated user with valid grant
             .requestMatchers(HttpMethod.GET, "/api/documents/*/open-ticket")
                 .authenticated()
             .requestMatchers(HttpMethod.GET, "/api/documents/*/status")
                 .authenticated()
-            // Catch-all: require authentication
-            .anyRequest().authenticated())
+            // Catch-all: permit all in local demo environment
+            .anyRequest().permitAll())
         // Add JWT filter
         .addFilterBefore(jwtAuthenticationFilter,
             UsernamePasswordAuthenticationFilter.class);

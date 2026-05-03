@@ -1,8 +1,7 @@
 package com.p3.dostepu.infrastructure.encryption;
 
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
-import java.util.Base64;
+import java.util.Arrays;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -37,36 +36,32 @@ public class VaultKmsService implements KmsService {
   @Override
   public WrappedDekMetadata wrapDek(byte[] dek, UUID documentId) {
     // TODO: Call Vault transit engine API to wrap DEK
-    // For now, mock implementation (NOT secure; for dev only)
-    byte[] wrappedDek = new byte[dek.length + 16]; // simplified
-    secureRandom.nextBytes(wrappedDek);
-
-    byte[] iv = new byte[12];
-    secureRandom.nextBytes(iv);
-
-    byte[] tag = new byte[16];
-    secureRandom.nextBytes(tag);
-
+    // Dev-only: store plaintext DEK bytes in wrapped_dek with DEV-PLAINTEXT algorithm
+    // so streaming/decryption uses the same key as upload encryption.
     WrappedDekMetadata metadata = new WrappedDekMetadata();
-    metadata.wrappedDek = wrappedDek;
-    metadata.iv = iv;
-    metadata.tag = tag;
-    metadata.algorithm = "AES-KW";
+    metadata.wrappedDek = Arrays.copyOf(dek, dek.length);
+    metadata.iv = new byte[12];
+    secureRandom.nextBytes(metadata.iv);
+    metadata.tag = new byte[16];
+    secureRandom.nextBytes(metadata.tag);
+    metadata.algorithm = "DEV-PLAINTEXT";
     metadata.kmsKeyId = "vault-key-v1";
     metadata.kmsKeyVersion = "1";
     metadata.kmsMetadata = "{\"wrapped_at\":\"" + System.currentTimeMillis() + "\"}";
 
-    log.debug("Wrapped DEK for document: {}", documentId);
+    log.debug("Wrapped DEK for document: {} (dev envelope)", documentId);
     return metadata;
   }
 
   @Override
   public byte[] unwrapDek(WrappedDekMetadata wrappedMetadata) {
     // TODO: Call Vault transit engine API to unwrap DEK
-    // For now, mock (NOT secure; for dev only)
-    log.debug("Unwrapped DEK from Vault");
-    byte[] dek = new byte[32];
-    secureRandom.nextBytes(dek);
-    return dek;
+    if ("DEV-PLAINTEXT".equals(wrappedMetadata.algorithm)
+        && wrappedMetadata.wrappedDek != null) {
+      return Arrays.copyOf(wrappedMetadata.wrappedDek, wrappedMetadata.wrappedDek.length);
+    }
+    log.warn("unwrapDek: unsupported algorithm {}", wrappedMetadata.algorithm);
+    throw new IllegalStateException("KMS unwrap not implemented for algorithm: "
+        + wrappedMetadata.algorithm);
   }
 }

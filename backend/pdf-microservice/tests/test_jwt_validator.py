@@ -26,7 +26,7 @@ def test_validate_valid_token(validator):
         "iat": datetime.utcnow()
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     result = validator.validate_open_ticket(token)
 
     assert result["sub"] == "user-123"
@@ -45,7 +45,7 @@ def test_validate_expired_token(validator):
         "iat": datetime.utcnow()
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
     with pytest.raises(jwt.ExpiredSignatureError):
         validator.validate_open_ticket(token)
@@ -62,7 +62,7 @@ def test_validate_invalid_audience(validator):
         "iat": datetime.utcnow()
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
     with pytest.raises(ValueError, match="Invalid audience"):
         validator.validate_open_ticket(token)
@@ -79,7 +79,7 @@ def test_validate_document_id_mismatch(validator):
         "iat": datetime.utcnow()
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
     with pytest.raises(ValueError, match="Document ID mismatch"):
         validator.validate_open_ticket(token, expected_document_id="doc-wrong")
@@ -94,7 +94,7 @@ def test_extract_user_id(validator):
         "exp": datetime.utcnow() + timedelta(minutes=1),
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     user_id = validator.extract_user_id(token)
 
     assert user_id == "user-123"
@@ -110,7 +110,7 @@ def test_extract_jti(validator):
         "exp": datetime.utcnow() + timedelta(minutes=1),
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     jti = validator.extract_jti(token)
 
     assert jti == "ticket-789"

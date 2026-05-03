@@ -29,7 +29,7 @@ def valid_ticket():
         "exp": datetime.utcnow() + timedelta(minutes=1),
         "iat": datetime.utcnow()
     }
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     return token
 
 
@@ -79,7 +79,7 @@ def test_stream_with_expired_ticket(encryption_setup):
         "exp": datetime.utcnow() - timedelta(minutes=1),  # Expired
         "iat": datetime.utcnow()
     }
-    expired_token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    expired_token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
     headers = {
         "X-DEK": base64.b64encode(encryption_setup["dek"]).decode(),

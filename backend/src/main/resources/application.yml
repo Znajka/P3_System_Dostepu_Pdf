@@ -6,7 +6,7 @@ spring:
       ddl-auto: validate
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQL13Dialect
+        dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
         use_sql_comments: true
   datasource:
@@ -42,6 +42,8 @@ app:
     expiration-notification-hours-before: ${EXPIRATION_NOTIFICATION_HOURS_BEFORE:24}
   security:
     ip-pinning-enabled: ${APP_SECURITY_IP_PINNING_ENABLED:true}
+  internal:
+    api-key: ${APP_INTERNAL_API_KEY:}
 
 logging:
   level:

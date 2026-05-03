@@ -81,6 +81,7 @@ public class FastApiPdfClient {
             .blobPath(responseJson.get("blob_path").asText())
             .nonce(responseJson.get("nonce").asText())
             .tag(responseJson.get("tag").asText())
+            .ciphertext(responseJson.get("ciphertext").asText())
             .ciphertextSize(responseJson.get("ciphertext_size").asLong())
             .algorithm(responseJson.get("algorithm").asText())
             .build();
@@ -119,6 +120,7 @@ public class FastApiPdfClient {
     private String blobPath;
     private String nonce;
     private String tag;
+    private String ciphertext;
     private Long ciphertextSize;
     private String algorithm;
   }

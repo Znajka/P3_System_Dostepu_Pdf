@@ -1,6 +1,8 @@
 package com.p3.dostepu.api.controller;
 
 import java.util.UUID;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import com.p3.dostepu.api.dto.AccessGrantRequest;
 import com.p3.dostepu.api.dto.AccessGrantResponse;
+import com.p3.dostepu.api.dto.AccessRevokeRequest;
 import com.p3.dostepu.api.response.ErrorResponse;
 import com.p3.dostepu.application.exception.ConflictException;
 import com.p3.dostepu.application.exception.ResourceNotFoundException;
@@ -21,8 +24,6 @@ import com.p3.dostepu.application.service.AccessGrantService;
 import com.p3.dostepu.domain.entity.User;
 import com.p3.dostepu.domain.repository.UserRepository;
 import com.p3.dostepu.security.CustomUserDetails;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -31,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
  * Endpoints:
  *   POST /api/documents/{id}/grant - grant access
  *   POST /api/documents/{id}/revoke - revoke access
- * Only OWNER or ADMIN can grant/revoke.
+ * Only document owner or ADMIN can grant/revoke (enforced in service).
  */
 @Slf4j
 @RestController
@@ -53,14 +54,13 @@ public class AccessGrantController {
    * @return AccessGrantResponse with grant ID and metadata
    */
   @PostMapping("/{id}/grant")
-  @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+  @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
   public ResponseEntity<?> grantAccess(
       @PathVariable(value = "id") UUID documentId,
       @Valid @RequestBody AccessGrantRequest request,
       HttpServletRequest httpRequest) {
 
     try {
-      // Extract authenticated user
       Authentication auth = SecurityContextHolder.getContext().getAuthentication();
       CustomUserDetails userDetails = (CustomUserDetails) auth.getPrincipal();
       UUID userId = userDetails.getUserId();
@@ -68,13 +68,10 @@ public class AccessGrantController {
       User grantedBy = userRepository.findById(userId)
           .orElseThrow(() -> new RuntimeException("Authenticated user not found"));
 
-      // Get client IP for audit
       String clientIp = getClientIp(httpRequest);
 
-      log.info("Grant access request: document={}, grantee={}, grantedBy={}", documentId,
-          request.getGranteeUserId(), userId);
+      log.info("Grant access request: document={}, grantedBy={}", documentId, userId);
 
-      // Process grant
       AccessGrantResponse response = grantService.grantAccess(documentId, request,
           grantedBy, clientIp);
 
@@ -123,14 +120,13 @@ public class AccessGrantController {
    * @return AccessGrantResponse with revoke metadata
    */
   @PostMapping("/{id}/revoke")
-  @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+  @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
   public ResponseEntity<?> revokeAccess(
       @PathVariable(value = "id") UUID documentId,
       @Valid @RequestBody AccessRevokeRequest request,
       HttpServletRequest httpRequest) {
 
     try {
-      // Extract authenticated user
       Authentication auth = SecurityContextHolder.getContext().getAuthentication();
       CustomUserDetails userDetails = (CustomUserDetails) auth.getPrincipal();
       UUID userId = userDetails.getUserId();
@@ -138,17 +134,12 @@ public class AccessGrantController {
       User revokedBy = userRepository.findById(userId)
           .orElseThrow(() -> new RuntimeException("Authenticated user not found"));
 
-      // Get client IP for audit
       String clientIp = getClientIp(httpRequest);
 
-      UUID granteeUserId = UUID.fromString(request.getGranteeUserId());
+      log.info("Revoke access request: document={}, revokedBy={}", documentId, userId);
 
-      log.info("Revoke access request: document={}, grantee={}, revokedBy={}", documentId,
-          request.getGranteeUserId(), userId);
-
-      // Process revoke
-      AccessGrantResponse response = grantService.revokeAccess(documentId, granteeUserId,
-          revokedBy, request.getReason(), clientIp);
+      AccessGrantResponse response = grantService.revokeAccess(documentId, request,
+          revokedBy, clientIp);
 
       return ResponseEntity.ok(response);
 

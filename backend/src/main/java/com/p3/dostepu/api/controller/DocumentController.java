@@ -54,7 +54,7 @@ public class DocumentController {
    * @return DocumentUploadResponse with document ID and metadata
    */
   @PostMapping(consumes = "multipart/form-data")
-  @PreAuthorize("hasAnyRole('ADMIN', 'OWNER', 'USER')")
+  @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
   public ResponseEntity<?> uploadDocument(
       @RequestParam(value = "title") String title,
       @RequestParam(value = "description", required = false) String description,

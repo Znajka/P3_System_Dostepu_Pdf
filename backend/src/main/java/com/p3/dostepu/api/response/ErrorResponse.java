@@ -1,6 +1,6 @@
 package com.p3.dostepu.api.response;
 
-import java.time.ZonedDateTime;
+import java.time.OffsetDateTime;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
@@ -38,7 +38,7 @@ public class ErrorResponse {
     private String message;
     private Details details;
     private String traceId;
-    private ZonedDateTime timestamp;
+    private String timestamp;
   }
 
   @Getter
@@ -57,7 +57,7 @@ public class ErrorResponse {
             .code(code)
             .message(message)
             .traceId(traceId)
-            .timestamp(ZonedDateTime.now())
+            .timestamp(OffsetDateTime.now().toString())
             .build())
         .build();
   }

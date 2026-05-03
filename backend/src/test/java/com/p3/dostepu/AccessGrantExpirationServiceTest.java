@@ -45,7 +45,7 @@ class AccessGrantExpirationServiceTest {
         .username("owner")
         .email("owner@example.com")
         .passwordHash("hashed")
-        .roles(java.util.Set.of(UserRole.OWNER))
+        .roles(java.util.Set.of(UserRole.USER))
         .active(true)
         .build();
     owner = userRepository.save(owner);

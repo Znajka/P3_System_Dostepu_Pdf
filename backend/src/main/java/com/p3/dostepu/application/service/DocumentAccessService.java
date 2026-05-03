@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.p3.dostepu.api.dto.OpenTicketResponse;
 import com.p3.dostepu.application.exception.ResourceNotFoundException;
 import com.p3.dostepu.application.exception.UnauthorizedException;
+import com.p3.dostepu.application.exception.RateLimitExceededException;
 import com.p3.dostepu.domain.entity.AccessAction;
 import com.p3.dostepu.domain.entity.AccessEventLog;
 import com.p3.dostepu.domain.entity.AccessResult;
@@ -80,7 +81,7 @@ public class DocumentAccessService {
               documentId, user.getId(), now)
           .isPresent();
 
-      // Step 4: Check if user is ADMIN or OWNER (bypass grant check)
+      // Step 4: Document owner or ADMIN bypasses grant requirement
       boolean isAuthorized = hasValidGrant
           || document.getOwner().getId().equals(user.getId())
           || user.getRoles().contains(UserRole.ADMIN);

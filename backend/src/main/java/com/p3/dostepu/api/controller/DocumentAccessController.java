@@ -146,6 +146,7 @@ public class DocumentAccessController {
           .build();
 
       if (isOwner || isAdmin) {
+        response.setAccessible(true);
         // Full view: all grants
         response.setGrants(document.getAccessGrants().stream()
             .map(grant -> DocumentStatusResponse.GrantInfo.builder()

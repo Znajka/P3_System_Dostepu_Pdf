@@ -12,7 +12,7 @@ import lombok.Setter;
 
 /**
  * DTO for POST /documents/{id}/grant request.
- * Per API contract: granteeUserId, expiresAt (ISO 8601 UTC), optional note.
+ * Provide exactly one of: granteeUserId, granteeUsername, granteeEmail.
  */
 @Getter
 @Setter
@@ -21,9 +21,14 @@ import lombok.Setter;
 @Builder
 public class AccessGrantRequest {
 
-  @NotBlank
   @JsonProperty("granteeUserId")
   private String granteeUserId;
+
+  @JsonProperty("granteeUsername")
+  private String granteeUsername;
+
+  @JsonProperty("granteeEmail")
+  private String granteeEmail;
 
   @NotNull
   @JsonProperty("expiresAt")

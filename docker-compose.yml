@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # PostgreSQL database (primary data store)
   postgres:
@@ -50,15 +48,14 @@ services:
       APP_JWT_SECRET: ${APP_JWT_SECRET:?error - APP_JWT_SECRET required}
       APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-3600000}
       APP_REFRESH_TOKEN_EXPIRATION_MS: ${APP_REFRESH_TOKEN_EXPIRATION_MS:-604800000}
+      APP_INTERNAL_API_KEY: ${APP_INTERNAL_API_KEY:-dev-p3-internal-api-key}
+      APP_SECURITY_IP_PINNING_ENABLED: ${APP_SECURITY_IP_PINNING_ENABLED:-false}
       # KMS (Key Management Service) - envelope encryption for DEKs
       KMS_PROVIDER: ${KMS_PROVIDER:-vault}
       KMS_ENDPOINT: ${KMS_ENDPOINT:-http://vault:8200}
       KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:?error - KMS_AUTH_TOKEN required}
       # FastAPI microservice mTLS/service-to-service
-      FASTAPI_SERVICE_URL: https://fastapi-pdf-service:8443
-      FASTAPI_MTLS_CERT: /etc/p3/certs/spring-boot.crt
-      FASTAPI_MTLS_KEY: /etc/p3/certs/spring-boot.key
-      FASTAPI_MTLS_CA: /etc/p3/certs/ca.crt
+      FASTAPI_SERVICE_URL: http://fastapi-pdf-service:8443
       # Security: rate-limiting, lockout
       APP_RATE_LIMIT_ENABLED: 'true'
       APP_RATE_LIMIT_FAILED_ATTEMPTS: ${APP_RATE_LIMIT_FAILED_ATTEMPTS:-5}
@@ -76,8 +73,7 @@ services:
       - ./backend/src:/app/src:ro
       - ./backend/pom.xml:/app/pom.xml:ro
       - ./backend/db/migrations:/app/migrations:ro
-      - /data/encrypted-documents:/data/encrypted-documents
-      - ./certs:/etc/p3/certs:ro
+      - ./data/encrypted-documents:/data/encrypted-documents
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,15 +99,11 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       FASTAPI_ENV: ${FASTAPI_ENV:-docker}
-      # Microservice identity & mTLS
-      FASTAPI_MTLS_CERT: /etc/p3/certs/fastapi.crt
-      FASTAPI_MTLS_KEY: /etc/p3/certs/fastapi.key
-      FASTAPI_MTLS_CA: /etc/p3/certs/ca.crt
-      # Spring Boot backend URL (for DEK requests)
-      SPRING_BOOT_SERVICE_URL: https://spring-boot-backend:8080
-      SPRING_BOOT_MTLS_CERT: /etc/p3/certs/fastapi.crt
-      SPRING_BOOT_MTLS_KEY: /etc/p3/certs/fastapi.key
-      SPRING_BOOT_MTLS_CA: /etc/p3/certs/ca.crt
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?error - APP_JWT_SECRET required}
+      APP_INTERNAL_API_KEY: ${APP_INTERNAL_API_KEY:-dev-p3-internal-api-key}
+      APP_SECURITY_IP_PINNING_ENABLED: ${APP_SECURITY_IP_PINNING_ENABLED:-false}
+      # Spring Boot backend URL (for ticket replay + KMS-style calls)
+      SPRING_BOOT_SERVICE_URL: ${SPRING_BOOT_SERVICE_URL:-http://spring-boot-backend:8080}
       # KMS endpoint
       KMS_PROVIDER: ${KMS_PROVIDER:-vault}
       KMS_ENDPOINT: ${KMS_ENDPOINT:-http://vault:8200}
@@ -128,8 +120,7 @@ services:
     volumes:
       - ./backend/pdf-microservice/app:/app/app:ro
       - ./backend/pdf-microservice/requirements.txt:/app/requirements.txt:ro
-      - /data/encrypted-documents:/data/encrypted-documents:ro
-      - ./certs:/etc/p3/certs:ro
+      - ./data/encrypted-documents:/data/encrypted-documents:ro
     depends_on:
       - spring-boot-backend
       - vault
@@ -144,10 +135,10 @@ services:
 
   # HashiCorp Vault (KMS for master key storage and DEK envelope encryption)
   vault:
-    image: vault:latest
+    image: hashicorp/vault:1.15.0
     container_name: p3-vault
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_ROOT_TOKEN:?error - VAULT_ROOT_TOKEN required}
+      VAULT_DEV_ROOT_TOKEN_ID: root-token
       VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
     ports:
       - "8200:8200"

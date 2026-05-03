@@ -1,6 +1,7 @@
 package com.p3.dostepu.security.jwt;
 
 import java.io.IOException;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
@@ -9,36 +10,35 @@ import com.p3.dostepu.api.response.ErrorResponse;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * JWT authentication entry point: handles unauthenticated requests
- * (missing or invalid token) by returning 401 Unauthorized with error JSON.
+ * JWT authentication entry point: handles authentication errors (401).
+ * Returns structured error response instead of default 401 page.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class JwtEntryPoint implements AuthenticationEntryPoint {
 
-  private final ObjectMapper objectMapper;
+  private final ObjectMapper objectMapper = new ObjectMapper();
 
   @Override
-  public void commence(HttpServletRequest httpServletRequest,
-      HttpServletResponse httpServletResponse, AuthenticationException e)
-      throws IOException, ServletException {
-    log.error("Responding with unauthorized error. Message: {}", e.getMessage());
+  public void commence(
+      HttpServletRequest httpServletRequest,
+      HttpServletResponse httpServletResponse,
+      AuthenticationException e) throws IOException, ServletException {
 
-    httpServletResponse.setContentType("application/json;charset=UTF-8");
+    log.error("Responding with unauthorized error. Message - {}", e.getMessage());
+
+    httpServletResponse.setContentType(MediaType.APPLICATION_JSON_VALUE);
     httpServletResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
 
-    ErrorResponse errorResponse = ErrorResponse.builder()
-        .code("UNAUTHORIZED")
-        .message("Authentication token is missing or invalid")
-        .traceId(httpServletRequest.getHeader("X-Trace-ID"))
-        .build();
+    ErrorResponse errorResponse = ErrorResponse.of(
+    "UNAUTHORIZED", 
+    "Unauthorized: " + e.getMessage(), 
+    httpServletRequest.getHeader("X-Trace-ID")
+    );
 
-    httpServletResponse.getWriter()
-        .write(objectMapper.writeValueAsString(errorResponse));
+    httpServletResponse.getWriter().write(objectMapper.writeValueAsString(errorResponse));
   }
 }

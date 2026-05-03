@@ -28,7 +28,7 @@ def test_validate_ip_pinning_matching_ip(validator):
         "iat": datetime.utcnow()
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
     # Should not raise
     result = validator.validate_open_ticket_with_ip_pinning(
@@ -51,7 +51,7 @@ def test_validate_ip_pinning_mismatched_ip(validator):
         "iat": datetime.utcnow()
     }
 
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS512")
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
     # Should raise ValueError for IP mismatch
     with pytest.raises(ValueError, match="IP mismatch"):

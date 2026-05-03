@@ -82,7 +82,7 @@ class AccessGrantAndTicketIntegrationTest {
   void setUp() {
     // Create test users
     adminUser = createUser("admin", "admin@example.com", Set.of(UserRole.ADMIN));
-    ownerUser = createUser("owner", "owner@example.com", Set.of(UserRole.OWNER));
+    ownerUser = createUser("owner", "owner@example.com", Set.of(UserRole.USER));
     authorizedUser = createUser("authorized-user", "authorized@example.com",
         Set.of(UserRole.USER));
     unauthorizedUser = createUser("unauthorized-user", "unauthorized@example.com",
@@ -93,7 +93,7 @@ class AccessGrantAndTicketIntegrationTest {
 
     // Generate tokens (mock authentication for testing)
     adminToken = generateMockToken(adminUser.getId(), "ADMIN");
-    ownerToken = generateMockToken(ownerUser.getId(), "OWNER");
+    ownerToken = generateMockToken(ownerUser.getId(), "USER");
     authorizedUserToken = generateMockToken(authorizedUser.getId(), "USER");
     unauthorizedUserToken = generateMockToken(unauthorizedUser.getId(), "USER");
   }
@@ -166,7 +166,7 @@ class AccessGrantAndTicketIntegrationTest {
     }
 
     @Test
-    @DisplayName("Non-ADMIN cannot grant access")
+    @DisplayName("Non-owner USER cannot grant access on others documents")
     void testUnauthorizedUserCannotGrantAccess() throws Exception {
       // Arrange
       String grantRequestJson = objectMapper.writeValueAsString(

@@ -4,12 +4,9 @@ Per CONTRIBUTING.md: use AES-256 for encrypting PDF content at rest.
 DEK (Document Encryption Key) provided by Spring Boot via API or environment.
 """
 
-import os
 import logging
 from typing import Tuple, Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
 import secrets
 
 logger = logging.getLogger(__name__)
@@ -50,7 +47,7 @@ class AES256GCMEncryption:
         Returns:
             12 bytes of random data (96 bits)
         """
-        nonce = secrets.token_bytes(AES256GCMEncMencryption.NONCE_SIZE)
+        nonce = secrets.token_bytes(AES256GCMEncryption.NONCE_SIZE)
         return nonce
 
     @staticmethod

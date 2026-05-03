@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 import asyncio
 
 from app.security.ticket_validator import (
-    validate_open_ticket,
+    validate_open_ticket_with_ip_pinning,
     validate_ticket_nonce,
     validate_ticket_for_document,
 )
@@ -26,13 +26,8 @@ router = APIRouter(prefix="/api/stream", tags=["streaming"])
 @router.get("/document/{document_id}", summary="Stream decrypted PDF to client")
 async def stream_document(
     document_id: str,
-    payload: dict = Depends(validate_open_ticket),
+    payload: dict = Depends(validate_open_ticket_with_ip_pinning),
     nonce: str = Depends(validate_ticket_nonce),
-    validated_payload: dict = Depends(
-        lambda payload=Depends(validate_open_ticket), doc_id=document_id: (
-            validate_ticket_for_document(doc_id, payload)
-        )
-    ),
     x_dek: str = Header(None, alias="X-DEK", description="Base64-encoded DEK"),
     x_nonce: str = Header(None, alias="X-Nonce", description="Base64-encoded nonce"),
     x_tag: str = Header(None, alias="X-Tag", description="Base64-encoded tag"),
@@ -66,6 +61,8 @@ async def stream_document(
     """
     try:
         user_id = payload.get("sub")
+        # Ensure ticket is scoped to requested document.
+        await validate_ticket_for_document(document_id, payload)
         logger.info(
             "Stream request: document=%s, user=%s, nonce=%s",
             document_id, user_id, nonce

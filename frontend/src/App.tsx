@@ -1,28 +1,40 @@
 /**
- * Main React application with secure viewer wrapper.
+ * Main React application with auth, dashboard, and secure viewer routes.
  */
 
 import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { DocumentPage } from "./pages/DocumentPage";
+import { LoginPage } from "./pages/LoginPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { apiClient } from "./services/api";
 
 function App() {
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(() =>
+    typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
+  );
 
   useEffect(() => {
-    // Load token from localStorage on mount
-    const token = localStorage.getItem("accessToken");
-    setAccessToken(token);
+    const sync = () => {
+      const t = localStorage.getItem("accessToken");
+      setAccessToken(t);
+      if (t) {
+        apiClient.setAuthToken(t);
+      } else {
+        apiClient.clearAuthToken();
+      }
+    };
+    window.addEventListener("storage", sync);
+    sync();
+    return () => window.removeEventListener("storage", sync);
   }, []);
 
-  // Disable browser print function
   useEffect(() => {
     const originalPrint = window.print;
     window.print = function () {
-      console.warn("Print functionality is disabled for security");
+      console.warn("Print is disabled in the secure viewer");
       return undefined;
     };
-
     return () => {
       window.print = originalPrint;
     };
@@ -31,11 +43,13 @@ function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route
           path="/documents/:documentId"
           element={<DocumentPage accessToken={accessToken} />}
         />
-        <Route path="/" element={<Navigate to="/documents/doc-123" replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Router>
   );

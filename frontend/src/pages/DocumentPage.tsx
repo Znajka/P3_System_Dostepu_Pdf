@@ -2,8 +2,8 @@
  * Document viewing page with secure viewer and audit reporting.
  */
 
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { DocumentViewer } from "../components/DocumentViewer";
 import SecureViewerWrapper, {
   SecurityViolation,
@@ -16,36 +16,42 @@ interface DocumentPageProps {
 
 export const DocumentPage: React.FC<DocumentPageProps> = ({ accessToken }) => {
   const navigate = useNavigate();
-  const [securityViolations, setSecurityViolations] = useState<
-    SecurityViolation[]
-  >([]);
-
-  // Extract documentId from URL
-  const params = new URLSearchParams(window.location.search);
-  const documentId = params.get("documentId") || "doc-123";
-
-  const { reportViolation } = useSecurityAudit(documentId);
+  const { documentId } = useParams<{ documentId: string }>();
+  const { reportViolation } = useSecurityAudit(documentId ?? "");
 
   if (!accessToken) {
     return (
-      <div style={{ padding: "20px" }}>
+      <div style={{ padding: "20px", fontFamily: "system-ui, sans-serif" }}>
         <p>Please log in to view documents.</p>
-        <button onClick={() => navigate("/login")}>Go to Login</button>
+        <button type="button" onClick={() => navigate("/login")}>
+          Go to login
+        </button>
+      </div>
+    );
+  }
+
+  if (!documentId) {
+    return (
+      <div style={{ padding: 20 }}>
+        <p>Missing document id.</p>
+        <Link to="/dashboard">Back to documents</Link>
       </div>
     );
   }
 
   const handleSecurityViolation = async (violation: SecurityViolation) => {
-    setSecurityViolations((prev) => [...prev, violation]);
     await reportViolation(violation);
   };
 
   return (
     <SecureViewerWrapper
       documentId={documentId}
-      title="P3 Dostepu - Secure Document Viewer"
+      title="P3 Dostepu — secure viewer"
       onSecurityViolation={handleSecurityViolation}
     >
+      <div style={{ margin: "12px 20px", fontFamily: "system-ui, sans-serif" }}>
+        <Link to="/dashboard">← Documents</Link>
+      </div>
       <DocumentViewer accessToken={accessToken} />
     </SecureViewerWrapper>
   );
