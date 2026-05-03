@@ -12,9 +12,11 @@ Prerequisites: Docker Compose with `APP_JWT_SECRET`, `APP_INTERNAL_API_KEY` (def
 6. **Stream** — `GET /stream/{ticket}` on the PDF service with headers `X-DEK`, `X-Nonce`, `X-Tag` (base64) from metadata. Expect `200` PDF; ticket is single-use via `POST /api/internal/tickets/mark-used` (called from FastAPI).
 7. **Revoke** — `POST /api/documents/{id}/revoke` with one grantee identifier; ticket/metadata should fail afterward for that grantee.
 
-## UI (`npm run dev` on port 3000)
+## UI
 
-Sign in → Dashboard (list, upload, grant/revoke for owned docs) → View opens pdf.js canvas route. Spring and FastAPI URLs default to Vite proxy (`/api`, `/stream`) when `REACT_APP_*` are unset at build time.
+**Docker (recommended):** After `docker compose up --build`, open **http://localhost:8080** — React is bundled inside Spring Boot (`SpaForwardingController` + `/static`). PDF streaming still uses FastAPI at **http://localhost:8443** (set `REACT_APP_FASTAPI_URL` when building if your setup differs).
+
+**Local dev:** `npm run dev` on port **3000** with Vite proxy to Spring (`/api`) and FastAPI (`/stream`).
 
 ## Security notes
 

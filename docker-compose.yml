@@ -30,10 +30,10 @@ services:
   # Spring Boot backend (auth, API, metadata, DEK management)
   spring-boot-backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.springboot
+      context: .
+      dockerfile: backend/Dockerfile.springboot
       args:
-        JAVA_VERSION: 21
+        REACT_APP_FASTAPI_URL: ${REACT_APP_FASTAPI_URL:-http://localhost:8443}
     container_name: p3-spring-boot
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}

@@ -1,0 +1,7 @@
+.git
+**/.vs
+**/node_modules
+frontend/dist
+backend/target
+data
+*.log
