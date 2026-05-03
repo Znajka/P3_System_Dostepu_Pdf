@@ -16,6 +16,10 @@ spring:
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=1h
 
 app:
   jwt:
@@ -23,10 +27,10 @@ app:
     expiration-ms: ${APP_JWT_EXPIRATION_MS:3600000}
     refresh-token-expiration-ms: ${APP_REFRESH_TOKEN_EXPIRATION_MS:604800000}
   rate-limit:
-    enabled: ${APP_RATE_LIMIT_ENABLED:true}
-    failed-attempts: ${APP_RATE_LIMIT_FAILED_ATTEMPTS:5}
-    window-minutes: ${APP_RATE_LIMIT_WINDOW_MINUTES:15}
-    lockout-minutes: ${APP_RATE_LIMIT_LOCKOUT_MINUTES:30}
+    enabled: true
+    failed-attempts: 5
+    window-minutes: 15
+    lockout-minutes: 30
   document:
     ticket-ttl-seconds: ${APP_DOCUMENT_TICKET_TTL_SECONDS:60}
 

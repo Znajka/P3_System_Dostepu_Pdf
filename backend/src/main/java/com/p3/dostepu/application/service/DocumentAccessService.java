@@ -20,6 +20,7 @@ import com.p3.dostepu.domain.repository.AccessGrantRepository;
 import com.p3.dostepu.domain.repository.DocumentRepository;
 import com.p3.dostepu.domain.repository.TicketNonceRepository;
 import com.p3.dostepu.security.jwt.JwtProvider;
+import com.p3.dostepu.infrastructure.security.RateLimiterService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -35,7 +36,7 @@ public class DocumentAccessService {
   private final AccessGrantRepository grantRepository;
   private final TicketNonceRepository ticketNonceRepository;
   private final AccessEventLogRepository auditLogRepository;
-  private final RateLimitService rateLimitService;
+  private final RateLimiterService rateLimiterService;
   private final JwtProvider jwtProvider;
   private final AuditLogService auditLogService; // ADD THIS
 
@@ -64,16 +65,8 @@ public class DocumentAccessService {
       String clientIp) {
 
     try {
-      // Step 1: Check rate-limit / account lockout
-      if (rateLimitService.isUserLocked(user.getId())) {
-        long remainingSeconds = rateLimitService.getRemainingLockoutSeconds(user.getId());
-        logAccessEvent(user.getId(), documentId, AccessAction.OPEN_ATTEMPT,
-            AccessResult.FAILURE, clientIp,
-            "Account locked (" + remainingSeconds + "s remaining)");
-        throw new UnauthorizedException(
-            "Account temporarily locked due to failed attempts. Try again in "
-                + remainingSeconds + " seconds.");
-      }
+      // Step 1: Check rate limit FIRST
+      rateLimiterService.checkRateLimit(user.getId(), "open-ticket");
 
       // Step 2: Validate document exists and not deleted
       Document document = documentRepository.findByIdAndDeletedAtNull(documentId)
@@ -93,7 +86,7 @@ public class DocumentAccessService {
           || user.getRoles().contains(UserRole.ADMIN);
 
       if (!isAuthorized) {
-        rateLimitService.recordFailedAttempt(user.getId());
+        rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
         logAccessEvent(user.getId(), documentId, AccessAction.OPEN_ATTEMPT,
             AccessResult.FAILURE, clientIp, "No valid grant");
         throw new UnauthorizedException(
@@ -123,8 +116,8 @@ public class DocumentAccessService {
       auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null, true,
           null);
 
-      // Step 9: Reset failed attempts on success
-      rateLimitService.resetFailedAttempts(user.getId());
+      // Step 9: Reset failed attempts on SUCCESS
+      rateLimiterService.resetFailedAttempts(user.getId());
 
       return OpenTicketResponse.builder()
           .ticket(ticket)
@@ -139,16 +132,18 @@ public class DocumentAccessService {
               .build())
           .build();
 
-    } catch (UnauthorizedException e) {
-      // LOG AUDIT EVENT (FAILURE) - UPDATED
-      auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null, false,
-          e.getMessage());
+    } catch (RateLimitExceededException e) {
+      // Log failure and increment counter
+      rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
+      auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null,
+          false, e.getMessage());
       throw e;
+
     } catch (Exception e) {
-      log.error("Failed to issue access ticket: {}", e.getMessage(), e);
-      // LOG AUDIT EVENT (FAILURE) - UPDATED
-      auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null, false,
-          e.getMessage());
+      // Log other failures
+      rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
+      auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null,
+          false, e.getMessage());
       throw e;
     }
   }
