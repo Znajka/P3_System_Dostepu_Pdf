@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+  h2:
+    console:
+      enabled: true
+
+app:
+  jwt:
+    secret: test-secret-key-for-testing-only
+    expiration-ms: 3600000
+  rate-limit:
+    enabled: true
+    failed-attempts: 5
+    window-minutes: 15
+    lockout-minutes: 30
+  security:
+    ip-pinning-enabled: true

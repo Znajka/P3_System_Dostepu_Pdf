@@ -1,11 +1,11 @@
 """
-FastAPI dependency for validating open-ticket JWTs.
+FastAPI dependency for validating open-ticket JWTs with IP-pinning.
 Used to protect streaming and decryption endpoints.
 """
 
 import logging
 from typing import Optional
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, HTTPException, Header, Request
 import jwt
 
 from app.security.jwt_validator import JwtValidator
@@ -24,25 +24,27 @@ def get_jwt_validator() -> JwtValidator:
     return _jwt_validator
 
 
-async def validate_open_ticket(
+async def validate_open_ticket_with_ip_pinning(
+    request: Request,
     authorization: str = Header(
         None, description="Bearer token from /documents/{id}/open-ticket"
     ),
     jwt_validator: JwtValidator = Depends(get_jwt_validator)
 ) -> dict:
     """
-    Dependency: validate open-ticket JWT from Authorization header.
-    Extracts "Bearer <token>" from header and validates.
+    Dependency: validate open-ticket JWT with IP-pinning from Authorization header.
+    Extracts "Bearer <token>" from header, validates signature, and checks IP pinning.
 
     Args:
+        request: FastAPI Request object (for extracting client IP)
         authorization: Authorization header value (format: "Bearer <token>")
         jwt_validator: JWT validator instance
 
     Returns:
-        Decoded JWT payload (sub, doc, aud, jti, exp, iat)
+        Decoded JWT payload (sub, doc, aud, jti, exp, iat, ip)
 
     Raises:
-        HTTPException: if token is missing, invalid, or expired
+        HTTPException: if token is missing, invalid, expired, or IP mismatch
     """
     if not authorization:
         logger.warning("Missing Authorization header")
@@ -60,12 +62,30 @@ async def validate_open_ticket(
             status_code=401, detail="Invalid Authorization header format"
         )
 
-    # Validate token
+    # Extract client IP from request
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info("Validating ticket with IP pinning: clientIp=%s", client_ip)
+
+    # TODO: Extract document ID and user ID from path/query params
+    # For now, these are passed as dependencies or extracted from JWT
+    document_id = request.path_params.get("document_id", "")
+    user_id = ""  # Will be extracted from token
+
+    # Validate token with IP pinning
     try:
-        payload = jwt_validator.validate_open_ticket(token)
+        # First validate token to extract user_id
+        payload = jwt_validator._validate_token(token)
+        user_id = payload.get("sub", "")
+        document_id = payload.get("doc", "")
+
+        # Now validate with IP pinning
+        payload = jwt_validator.validate_open_ticket_with_ip_pinning(
+            token, document_id, user_id, client_ip
+        )
+
         logger.info(
-            "Ticket validated: user=%s, doc=%s", payload.get("sub"),
-            payload.get("doc")
+            "Ticket validated with IP pinning: user=%s, doc=%s, ip=%s",
+            user_id, document_id, client_ip
         )
         return payload
 
@@ -87,14 +107,14 @@ async def validate_open_ticket(
 
 
 async def validate_ticket_nonce(
-    payload: dict = Depends(validate_open_ticket),
+    payload: dict = Depends(validate_open_ticket_with_ip_pinning),
 ) -> str:
     """
     Dependency: extract and return ticket nonce (JTI) from validated payload.
     Used for replay prevention (mark nonce as used in DB).
 
     Args:
-        payload: decoded JWT payload from validate_open_ticket
+        payload: decoded JWT payload from validate_open_ticket_with_ip_pinning
 
     Returns:
         JTI (unique ticket nonce)
@@ -107,7 +127,7 @@ async def validate_ticket_nonce(
 
 async def validate_ticket_for_document(
     document_id: str,
-    payload: dict = Depends(validate_open_ticket),
+    payload: dict = Depends(validate_open_ticket_with_ip_pinning),
 ) -> dict:
     """
     Dependency: validate ticket is scoped to specific document.

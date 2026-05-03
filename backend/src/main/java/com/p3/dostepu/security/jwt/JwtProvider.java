@@ -19,10 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * JWT token provider: issues, validates, and extracts claims from JWT tokens.
- * - Algorithm: HS512 (HMAC with SHA-512).
- * - Expiration: configurable via properties (default 1 hour).
- * - Claims: sub (user id), roles, iat, exp, jti (unique token id).
- * Per CONTRIBUTING.md API Design: JWT with rotation and expiration.
+ * Updated to support IP-pinning for enhanced security.
+ * Per CONTRIBUTING.md: API authentication tokens must have expiration and be revocable.
  */
 @Slf4j
 @Component
@@ -36,6 +34,9 @@ public class JwtProvider {
 
   @Value("${app.jwt.refresh-token-expiration-ms:604800000}")
   private Integer refreshTokenExpirationMs;
+
+  @Value("${app.security.ip-pinning-enabled:true}")
+  private Boolean ipPinningEnabled;
 
   /**
    * Generate JWT access token from authentication.
@@ -78,25 +79,52 @@ public class JwtProvider {
   }
 
   /**
-   * Generate single-use document access ticket (short TTL, scoped to document).
+   * Generate single-use document access ticket with IP pinning.
    * Per API contract: ticket for /documents/{id}/open-ticket endpoint.
+   *
+   * Updated: includes IP address claim for IP-pinning security.
+   * - ip: client IP address (pinned to this IP)
+   * - aud: pdf-microservice (audience)
+   * - scopes: open:document
+   *
+   * @param userId user UUID
+   * @param documentId document UUID
+   * @param nonce unique ticket nonce (JTI)
+   * @param clientIp client IP address (for IP pinning)
+   * @param ttlSeconds ticket time-to-live in seconds
+   * @return signed JWT ticket with IP pinning
    */
-  public String generateDocumentAccessTicket(String userId, String documentId,
-      String nonce, Integer ttlSeconds) {
+  public String generateDocumentAccessTicket(
+      String userId,
+      String documentId,
+      String nonce,
+      String clientIp,
+      Integer ttlSeconds
+  ) {
     Date now = new Date();
     Date expiryDate = new Date(now.getTime() + (ttlSeconds * 1000L));
 
-    return Jwts.builder()
+    String ticket = Jwts.builder()
         .setSubject(userId)
         .claim("doc", documentId)
         .claim("aud", "pdf-microservice")
         .claim("jti", nonce)
         .claim("nonce", nonce)
         .claim("scopes", "open:document")
+        .claim("ip", clientIp) // IP-pinning claim
+        .claim("ip_pinning_enabled", ipPinningEnabled)
         .setIssuedAt(now)
         .setExpiration(expiryDate)
         .signWith(SignatureAlgorithm.HS512, jwtSecret.getBytes(StandardCharsets.UTF_8))
         .compact();
+
+    logger.info(
+        "Generated document access ticket: userId={}, documentId={}, nonce={}, "
+            + "clientIp={}, ttlSeconds={}, ipPinningEnabled={}",
+        userId, documentId, nonce, clientIp, ttlSeconds, ipPinningEnabled
+    );
+
+    return ticket;
   }
 
   /**
@@ -147,6 +175,41 @@ public class JwtProvider {
         .stream()
         .map(UserRole::valueOf)
         .collect(Collectors.toSet());
+  }
+
+  /**
+   * Extract IP address from JWT token (for IP-pinning validation).
+   *
+   * @param token JWT token
+   * @return IP address embedded in token (or null if not present)
+   */
+  public String getIpAddressFromJwt(String token) {
+    try {
+      Claims claims = Jwts.parser()
+          .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
+          .parseClaimsJws(token)
+          .getBody();
+      return claims.get("ip", String.class);
+    } catch (Exception e) {
+      log.debug("Failed to extract IP from token: {}", e.getMessage());
+      return null;
+    }
+  }
+
+  /**
+   * Check if IP pinning is enabled in token.
+   */
+  public boolean isIpPinningEnabledInToken(String token) {
+    try {
+      Claims claims = Jwts.parser()
+          .setSigningKey(jwtSecret.getBytes(StandardCharsets.UTF_8))
+          .parseClaimsJws(token)
+          .getBody();
+      Boolean enabled = claims.get("ip_pinning_enabled", Boolean.class);
+      return enabled != null && enabled;
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   /**

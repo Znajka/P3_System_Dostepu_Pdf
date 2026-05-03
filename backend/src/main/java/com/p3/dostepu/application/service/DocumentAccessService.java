@@ -96,9 +96,20 @@ public class DocumentAccessService {
       // Step 5: Generate unique nonce (JTI)
       String nonce = UUID.randomUUID().toString();
 
-      // Step 6: Create JWT ticket (signed, scoped to document + microservice)
-      String ticket = jwtProvider.generateDocumentAccessTicket(user.getId().toString(),
-          documentId.toString(), nonce, ticketTtlSeconds);
+      // Step 6: Create JWT ticket WITH IP PINNING
+      String ticket = jwtProvider.generateDocumentAccessTicket(
+          user.getId().toString(),
+          documentId.toString(),
+          nonce,
+          clientIp,  // IP-pinning: include client IP in ticket
+          ticketTtlSeconds
+      );
+
+      log.info(
+          "Generated access ticket with IP pinning: user={}, document={}, "
+              + "clientIp={}, ttlSeconds={}",
+          user.getId(), documentId, clientIp, ticketTtlSeconds
+      );
 
       // Step 7: Persist nonce for replay prevention (mark used after FastAPI validates)
       ZonedDateTime ticketExpiry = now.plusSeconds(ticketTtlSeconds);

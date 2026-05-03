@@ -39,4 +39,29 @@ public interface AccessGrantRepository extends JpaRepository<AccessGrant, UUID> 
       + "AND ag.expiresAt > :now")
   Integer countActiveGrants(@Param("documentId") UUID documentId,
       @Param("granteeUserId") UUID granteeUserId, @Param("now") ZonedDateTime now);
+
+  /**
+   * Find expired grants that have not been revoked.
+   * Used by scheduled task to automatically revoke expired access.
+   * Per CONTRIBUTING.md: Documents inaccessible after expiration.
+   */
+  @Query("SELECT ag FROM AccessGrant ag WHERE ag.revoked = false "
+      + "AND ag.expiresAt <= :now ORDER BY ag.expiresAt ASC")
+  List<AccessGrant> findExpiredAndNotRevokedGrants(@Param("now") ZonedDateTime now);
+
+  /**
+   * Count expired grants (for monitoring).
+   */
+  @Query("SELECT COUNT(ag) FROM AccessGrant ag WHERE ag.revoked = false "
+      + "AND ag.expiresAt <= :now")
+  Long countExpiredGrants(@Param("now") ZonedDateTime now);
+
+  /**
+   * Find grants expiring within N days (for proactive notifications).
+   */
+  @Query("SELECT ag FROM AccessGrant ag WHERE ag.revoked = false "
+      + "AND ag.expiresAt > :now AND ag.expiresAt <= :soon "
+      + "ORDER BY ag.expiresAt ASC")
+  List<AccessGrant> findExpiringWithinDays(@Param("now") ZonedDateTime now,
+      @Param("soon") ZonedDateTime soon);
 }
