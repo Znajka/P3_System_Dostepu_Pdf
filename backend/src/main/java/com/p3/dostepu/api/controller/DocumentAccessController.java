@@ -1,5 +1,6 @@
 package com.p3.dostepu.api.controller;
 
+import java.time.ZonedDateTime;
 import java.util.stream.Collectors;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -18,10 +19,13 @@ import com.p3.dostepu.api.response.ErrorResponse;
 import com.p3.dostepu.application.exception.ResourceNotFoundException;
 import com.p3.dostepu.application.exception.UnauthorizedException;
 import com.p3.dostepu.application.service.DocumentAccessService;
+import com.p3.dostepu.application.util.AccessShareStatus;
+import com.p3.dostepu.application.util.DocumentTitles;
 import com.p3.dostepu.domain.entity.AccessGrant;
 import com.p3.dostepu.domain.entity.Document;
 import com.p3.dostepu.domain.entity.User;
 import com.p3.dostepu.domain.entity.UserRole;
+import com.p3.dostepu.domain.repository.AccessGrantRepository;
 import com.p3.dostepu.domain.repository.DocumentRepository;
 import com.p3.dostepu.domain.repository.UserRepository;
 import com.p3.dostepu.security.CustomUserDetails;
@@ -44,6 +48,7 @@ public class DocumentAccessController {
   private final DocumentAccessService accessService;
   private final DocumentRepository documentRepository;
   private final UserRepository userRepository;
+  private final AccessGrantRepository accessGrantRepository;
 
   /**
    * GET /api/documents/{id}/open-ticket - Request document access ticket.
@@ -137,10 +142,15 @@ public class DocumentAccessController {
       boolean isOwner = document.getOwner().getId().equals(user.getId());
       boolean isAdmin = user.getRoles().contains(UserRole.ADMIN);
 
+      ZonedDateTime now = ZonedDateTime.now();
+
+      String displayTitle =
+          isOwner ? document.getTitle() : DocumentTitles.maskedForNonOwner(documentId);
+
       // Build response based on authorization
       DocumentStatusResponse response = DocumentStatusResponse.builder()
           .documentId(documentId.toString())
-          .title(document.getTitle())
+          .title(displayTitle)
           .ownerId(document.getOwner().getId().toString())
           .createdAt(document.getCreatedAt())
           .build();
@@ -152,30 +162,31 @@ public class DocumentAccessController {
             .map(grant -> DocumentStatusResponse.GrantInfo.builder()
                 .grantId(grant.getId().toString())
                 .granteeUserId(grant.getGranteeUser().getId().toString())
+                .granteeUsername(grant.getGranteeUser().getUsername())
+                .granteeEmail(grant.getGranteeUser().getEmail())
+                .validFrom(grant.getValidFrom())
                 .expiresAt(grant.getExpiresAt())
                 .revoked(grant.getRevoked())
+                .shareStatus(AccessShareStatus.forGrant(grant, now))
                 .build())
             .collect(Collectors.toList()));
         response.setLocked(user.isLocked());
       } else {
-        // Limited view: only their grant (if active)
-        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
-        AccessGrant userGrant = document.getAccessGrants().stream()
-            .filter(g -> g.getGranteeUser().getId().equals(user.getId())
-                && !g.getRevoked()
-                && g.getExpiresAt().isAfter(now))
-            .findFirst()
-            .orElse(null);
-
-        if (userGrant != null) {
-          response.setAccessible(true);
-          response.setAccess(DocumentStatusResponse.AccessInfo.builder()
-              .granteeUserId(user.getId().toString())
-              .expiresAt(userGrant.getExpiresAt())
-              .build());
-        } else {
-          response.setAccessible(false);
-        }
+        accessGrantRepository
+            .findFirstByDocument_IdAndGranteeUser_IdAndRevokedFalseOrderByCreatedAtDesc(
+                documentId, user.getId())
+            .ifPresentOrElse(
+                g -> {
+                  response.setAccessible(g.isActive());
+                  response.setAccess(DocumentStatusResponse.AccessInfo.builder()
+                      .grantId(g.getId().toString())
+                      .granteeUserId(user.getId().toString())
+                      .validFrom(g.getValidFrom())
+                      .expiresAt(g.getExpiresAt())
+                      .shareStatus(AccessShareStatus.forGrant(g, now))
+                      .build());
+                },
+                () -> response.setAccessible(false));
       }
 
       return ResponseEntity.ok(response);

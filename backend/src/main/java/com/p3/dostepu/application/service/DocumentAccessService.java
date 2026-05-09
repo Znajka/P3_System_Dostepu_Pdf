@@ -9,14 +9,10 @@ import com.p3.dostepu.api.dto.OpenTicketResponse;
 import com.p3.dostepu.application.exception.ResourceNotFoundException;
 import com.p3.dostepu.application.exception.UnauthorizedException;
 import com.p3.dostepu.application.exception.RateLimitExceededException;
-import com.p3.dostepu.domain.entity.AccessAction;
-import com.p3.dostepu.domain.entity.AccessEventLog;
-import com.p3.dostepu.domain.entity.AccessResult;
 import com.p3.dostepu.domain.entity.Document;
 import com.p3.dostepu.domain.entity.TicketNonce;
 import com.p3.dostepu.domain.entity.User;
 import com.p3.dostepu.domain.entity.UserRole;
-import com.p3.dostepu.domain.repository.AccessEventLogRepository;
 import com.p3.dostepu.domain.repository.AccessGrantRepository;
 import com.p3.dostepu.domain.repository.DocumentRepository;
 import com.p3.dostepu.domain.repository.TicketNonceRepository;
@@ -36,7 +32,6 @@ public class DocumentAccessService {
   private final DocumentRepository documentRepository;
   private final AccessGrantRepository grantRepository;
   private final TicketNonceRepository ticketNonceRepository;
-  private final AccessEventLogRepository auditLogRepository;
   private final RateLimiterService rateLimiterService;
   private final JwtProvider jwtProvider;
   private final AuditLogService auditLogService; // ADD THIS
@@ -61,6 +56,17 @@ public class DocumentAccessService {
    * @param clientIp client IP for audit
    * @return OpenTicketResponse with JWT ticket (60-second TTL)
    */
+  /**
+   * Audit FK to document exists only when a row is present (avoids FK violation if {@code documentId}
+   * is unknown or dangling).
+   */
+  private UUID documentIdForAuditOrNull(UUID documentId) {
+    if (documentId == null) {
+      return null;
+    }
+    return documentRepository.findById(documentId).isPresent() ? documentId : null;
+  }
+
   @Transactional
   public OpenTicketResponse issueAccessTicket(UUID documentId, User user,
       String clientIp) {
@@ -77,8 +83,7 @@ public class DocumentAccessService {
       // Step 3: Check access grant (valid and not expired)
       ZonedDateTime now = ZonedDateTime.now();
       boolean hasValidGrant = grantRepository
-          .findByDocumentIdAndGranteeUserIdAndRevokedFalseAndExpiresAtAfter(
-              documentId, user.getId(), now)
+          .findOpenWindowGrant(documentId, user.getId(), now)
           .isPresent();
 
       // Step 4: Document owner or ADMIN bypasses grant requirement
@@ -88,10 +93,13 @@ public class DocumentAccessService {
 
       if (!isAuthorized) {
         rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
-        logAccessEvent(user.getId(), documentId, AccessAction.OPEN_ATTEMPT,
-            AccessResult.FAILURE, clientIp, "No valid grant");
+        auditLogService.logOpenAttemptFailurePersisted(user.getId(),
+            documentIdForAuditOrNull(documentId), clientIp, null,
+            appendDocumentIdHint(
+                "No valid grant or outside access window (revoked, expired, or not yet active)",
+                documentId));
         throw new UnauthorizedException(
-            "Access denied: no valid grant for this document");
+            "Access denied: no valid grant for this document (check start time and expiry)");
       }
 
       // Step 5: Generate unique nonce (JTI)
@@ -145,17 +153,27 @@ public class DocumentAccessService {
           .build();
 
     } catch (RateLimitExceededException e) {
-      // Log failure and increment counter
       rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
-      auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null,
-          false, e.getMessage());
+      auditLogService.logOpenAttemptFailurePersisted(user.getId(),
+          documentIdForAuditOrNull(documentId), clientIp, null, e.getMessage());
+      throw e;
+
+    } catch (UnauthorizedException e) {
+      // Already audited + recorded before throw (no valid grant window, etc.).
+      throw e;
+
+    } catch (ResourceNotFoundException e) {
+      rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
+      auditLogService.logOpenAttemptFailurePersisted(user.getId(),
+          documentIdForAuditOrNull(documentId), clientIp, null,
+          appendDocumentIdHint(e.getMessage(), documentId));
       throw e;
 
     } catch (Exception e) {
-      // Log other failures
       rateLimiterService.recordFailedAttempt(user.getId(), "open-ticket");
-      auditLogService.logOpenAttempt(user.getId(), documentId, clientIp, null,
-          false, e.getMessage());
+      auditLogService.logOpenAttemptFailurePersisted(user.getId(),
+          documentIdForAuditOrNull(documentId), clientIp, null,
+          appendDocumentIdHint(e.getMessage(), documentId));
       throw e;
     }
   }
@@ -191,33 +209,28 @@ public class DocumentAccessService {
     return true;
   }
 
-  /**
-   * Log access event to audit trail.
-   */
-  private void logAccessEvent(UUID userId, UUID documentId, AccessAction action,
-      AccessResult result, String clientIp, String reason) {
-    try {
-      AccessEventLog event = AccessEventLog.builder()
-          .user(userId != null ? new User() {
-            {
-              setId(userId);
-            }
-          } : null)
-          .document(documentId != null ? new Document() {
-            {
-              setId(documentId);
-            }
-          } : null)
-          .action(action)
-          .result(result)
-          .ipAddress(clientIp)
-          .reason(reason)
-          .timestampUtc(ZonedDateTime.now())
-          .build();
-
-      auditLogRepository.save(event);
-    } catch (Exception e) {
-      log.error("Failed to log access event: {}", e.getMessage());
+  /** {@link AccessEventLog#getReason()} max length is 255. */
+  private static String appendDocumentIdHint(String message, UUID documentId) {
+    final int maxReason = 255;
+    if (documentId == null) {
+      return truncate(message == null ? "" : message, maxReason);
     }
+    String trimmed = message == null ? "" : message;
+    if (trimmed.contains(documentId.toString())) {
+      return truncate(trimmed, maxReason);
+    }
+    String suffix = " [document_id=" + documentId + "]";
+    String combined = trimmed + suffix;
+    if (combined.length() <= maxReason) {
+      return combined;
+    }
+    return truncate(trimmed, Math.max(0, maxReason - suffix.length())) + suffix;
+  }
+
+  private static String truncate(String s, int maxLen) {
+    if (s.length() <= maxLen) {
+      return s;
+    }
+    return s.substring(0, Math.max(0, maxLen - 1)) + "…";
   }
 }

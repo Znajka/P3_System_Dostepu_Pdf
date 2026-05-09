@@ -61,6 +61,7 @@ class AccessGrantExpirationServiceTest {
 
     // Create test document
     document = Document.builder()
+        .id(UUID.randomUUID())
         .owner(owner)
         .title("Test Document")
         .blobPath("/data/doc.enc")
@@ -72,11 +73,13 @@ class AccessGrantExpirationServiceTest {
   @Test
   void testRevokeExpiredGrants() {
     // Create expired grant
+    ZonedDateTime t = ZonedDateTime.now();
     AccessGrant expiredGrant = AccessGrant.builder()
         .document(document)
         .granteeUser(grantee)
         .grantedByUser(owner)
-        .expiresAt(ZonedDateTime.now().minusHours(1)) // Expired
+        .validFrom(t.minusDays(1))
+        .expiresAt(t.minusHours(1)) // Expired
         .revoked(false)
         .build();
     expiredGrant = grantRepository.save(expiredGrant);
@@ -94,11 +97,13 @@ class AccessGrantExpirationServiceTest {
   @Test
   void testDoNotRevokeValidGrants() {
     // Create valid (not expired) grant
+    ZonedDateTime t = ZonedDateTime.now();
     AccessGrant validGrant = AccessGrant.builder()
         .document(document)
         .granteeUser(grantee)
         .grantedByUser(owner)
-        .expiresAt(ZonedDateTime.now().plusHours(1)) // Not expired
+        .validFrom(t.minusHours(1))
+        .expiresAt(t.plusHours(1)) // Not expired
         .revoked(false)
         .build();
     validGrant = grantRepository.save(validGrant);
@@ -114,11 +119,13 @@ class AccessGrantExpirationServiceTest {
   @Test
   void testDoNotRevokeAlreadyRevoked() {
     // Create already revoked grant
+    ZonedDateTime t = ZonedDateTime.now();
     AccessGrant revokedGrant = AccessGrant.builder()
         .document(document)
         .granteeUser(grantee)
         .grantedByUser(owner)
-        .expiresAt(ZonedDateTime.now().minusHours(1))
+        .validFrom(t.minusDays(1))
+        .expiresAt(t.minusHours(1))
         .revoked(true) // Already revoked
         .revokedAt(ZonedDateTime.now().minusHours(2))
         .build();
@@ -136,11 +143,13 @@ class AccessGrantExpirationServiceTest {
   void testRevokeMultipleExpiredGrants() {
     // Create multiple expired grants
     for (int i = 0; i < 3; i++) {
+      ZonedDateTime t = ZonedDateTime.now();
       AccessGrant grant = AccessGrant.builder()
           .document(document)
           .granteeUser(grantee)
           .grantedByUser(owner)
-          .expiresAt(ZonedDateTime.now().minusMinutes(i))
+          .validFrom(t.minusHours(6))
+          .expiresAt(t.minusMinutes(i))
           .revoked(false)
           .build();
       grantRepository.save(grant);
@@ -161,11 +170,13 @@ class AccessGrantExpirationServiceTest {
   @Test
   void testTaskStats() {
     // Create expired grant
+    ZonedDateTime t = ZonedDateTime.now();
     AccessGrant grant = AccessGrant.builder()
         .document(document)
         .granteeUser(grantee)
         .grantedByUser(owner)
-        .expiresAt(ZonedDateTime.now().minusHours(1))
+        .validFrom(t.minusDays(1))
+        .expiresAt(t.minusHours(1))
         .revoked(false)
         .build();
     grantRepository.save(grant);

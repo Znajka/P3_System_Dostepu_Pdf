@@ -18,6 +18,7 @@ import com.p3.dostepu.application.service.AccessGrantService;
 import com.p3.dostepu.application.service.DocumentAccessService;
 import com.p3.dostepu.api.dto.AccessGrantRequest;
 import com.p3.dostepu.api.dto.AccessGrantResponse;
+import com.p3.dostepu.api.dto.AccessRevokeRequest;
 import com.p3.dostepu.api.dto.OpenTicketResponse;
 import com.p3.dostepu.domain.entity.Document;
 import com.p3.dostepu.domain.entity.DocumentKeyMetadata;
@@ -81,7 +82,7 @@ class E2EAccessGrantTicketTest {
   void testE2EGrantAndFetchTicket() {
     // Step 1: Admin grants access to authorized user
     AccessGrantRequest grantRequest = AccessGrantRequest.builder()
-        .granteeUserId(authorizedUser.getId().toString())
+        .granteeUsername(authorizedUser.getUsername())
         .expiresAt(ZonedDateTime.now().plusDays(7))
         .note("E2E test grant")
         .build();
@@ -117,7 +118,7 @@ class E2EAccessGrantTicketTest {
   void testE2EExpiredGrantDeniesTicket() throws InterruptedException {
     // Step 1: Grant with short expiration (2 seconds)
     AccessGrantRequest grantRequest = AccessGrantRequest.builder()
-        .granteeUserId(authorizedUser.getId().toString())
+        .granteeUsername(authorizedUser.getUsername())
         .expiresAt(ZonedDateTime.now().plusSeconds(2))
         .build();
 
@@ -150,7 +151,7 @@ class E2EAccessGrantTicketTest {
   void testE2ERevokedGrantDeniesTicket() {
     // Step 1: Admin grants access
     AccessGrantRequest grantRequest = AccessGrantRequest.builder()
-        .granteeUserId(authorizedUser.getId().toString())
+        .granteeUsername(authorizedUser.getUsername())
         .expiresAt(ZonedDateTime.now().plusDays(7))
         .build();
 
@@ -167,9 +168,13 @@ class E2EAccessGrantTicketTest {
 
     // Step 3: Admin revokes grant
     grantService.revokeAccess(
-        document.getId(), authorizedUser.getId(), adminUser, "Testing revocation",
-        "127.0.0.1"
-    );
+        document.getId(),
+        AccessRevokeRequest.builder()
+            .granteeUsername(authorizedUser.getUsername())
+            .reason("Testing revocation")
+            .build(),
+        adminUser,
+        "127.0.0.1");
 
     // Step 4: User cannot fetch ticket after revocation
     assertThrows(UnauthorizedException.class, () ->
@@ -186,7 +191,7 @@ class E2EAccessGrantTicketTest {
     grantService.grantAccess(
         document.getId(),
         AccessGrantRequest.builder()
-            .granteeUserId(authorizedUser.getId().toString())
+            .granteeUsername(authorizedUser.getUsername())
             .expiresAt(ZonedDateTime.now().plusDays(7))
             .build(),
         ownerUser,
@@ -197,7 +202,7 @@ class E2EAccessGrantTicketTest {
     grantService.grantAccess(
         document.getId(),
         AccessGrantRequest.builder()
-            .granteeUserId(unauthorizedUser.getId().toString())
+            .granteeUsername(unauthorizedUser.getUsername())
             .expiresAt(ZonedDateTime.now().plusDays(7))
             .build(),
         adminUser,
@@ -226,7 +231,7 @@ class E2EAccessGrantTicketTest {
       grantService.grantAccess(
           document.getId(),
           AccessGrantRequest.builder()
-              .granteeUserId(user.getId().toString())
+              .granteeUsername(user.getUsername())
               .expiresAt(ZonedDateTime.now().plusDays(7))
               .build(),
           adminUser,
@@ -275,6 +280,7 @@ class E2EAccessGrantTicketTest {
 
   private Document createDocument(User owner, String title) {
     Document doc = Document.builder()
+        .id(UUID.randomUUID())
         .owner(owner)
         .title(title)
         .blobPath("/data/test-doc-" + UUID.randomUUID() + ".pdf.enc")

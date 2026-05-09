@@ -68,7 +68,7 @@ public class SessionToken {
   @Column(name = "revoked_at")
   private ZonedDateTime revokedAt;
 
-  @Column(name = "ip_address", columnDefinition = "inet")
+  @Column(name = "ip_address", length = 64)
   private String ipAddress;
 
   @Column(length = 512)

@@ -21,11 +21,12 @@ import com.p3.dostepu.domain.repository.AccessEventLogRepository;
 import com.p3.dostepu.domain.repository.AccessGrantRepository;
 import com.p3.dostepu.domain.repository.DocumentRepository;
 import com.p3.dostepu.domain.repository.UserRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * AccessGrantService with audit logging and grantee resolution by id/username/email.
+ * AccessGrantService with audit logging; grant/revoke by grantee username only.
  */
 @Slf4j
 @Service
@@ -55,13 +56,31 @@ public class AccessGrantService {
             "Only document owner or ADMIN can grant access");
       }
 
-      granteeUserId = resolveGranteeUserId(request);
+      final UUID resolvedGranteeUserId = resolveGranteeUserFromUsername(request);
+      granteeUserId = resolvedGranteeUserId;
 
-      User granteeUser = userRepository.findByIdAndActiveTrue(granteeUserId)
+      User granteeUser = userRepository.findByIdAndActiveTrue(resolvedGranteeUserId)
           .orElseThrow(() -> new ResourceNotFoundException(
-              "Grantee user not found or inactive: " + granteeUserId));
+              "Grantee user not found or inactive: " + resolvedGranteeUserId));
+
+      if (granteeUser.getId().equals(grantedBy.getId())) {
+        throw new IllegalArgumentException(
+            "You cannot grant access to yourself — owners and admins already have access.");
+      }
 
       ZonedDateTime now = ZonedDateTime.now();
+      grantRepository.revokeExpiredGrantsForDocumentAndGrantee(
+          documentId, resolvedGranteeUserId, now,
+          "Superseded: access period ended");
+
+      ZonedDateTime validFrom = request.getValidFrom() != null
+          ? request.getValidFrom()
+          : now;
+      if (!request.getExpiresAt().isAfter(validFrom)) {
+        logAccessEvent(grantedBy.getId(), documentId, AccessAction.GRANT,
+            AccessResult.FAILURE, clientIp, "expiresAt must be after validFrom");
+        throw new IllegalArgumentException("expiresAt must be after validFrom");
+      }
       if (!request.getExpiresAt().isAfter(now)) {
         logAccessEvent(grantedBy.getId(), documentId, AccessAction.GRANT,
             AccessResult.FAILURE, clientIp, "Expiration time is not in the future");
@@ -69,8 +88,8 @@ public class AccessGrantService {
             "Expiration time must be in the future");
       }
 
-      Integer activeCount = grantRepository.countActiveGrants(documentId, granteeUserId,
-          now);
+      Integer activeCount = grantRepository.countActiveGrants(documentId,
+          resolvedGranteeUserId, now);
       if (activeCount != null && activeCount > 0) {
         logAccessEvent(grantedBy.getId(), documentId, AccessAction.GRANT,
             AccessResult.FAILURE, clientIp,
@@ -83,6 +102,7 @@ public class AccessGrantService {
           .document(document)
           .granteeUser(granteeUser)
           .grantedByUser(grantedBy)
+          .validFrom(validFrom)
           .expiresAt(request.getExpiresAt())
           .revoked(false)
           .build();
@@ -97,6 +117,7 @@ public class AccessGrantService {
           .documentId(grant.getDocument().getId())
           .granteeUserId(grant.getGranteeUser().getId())
           .grantedBy(grant.getGrantedByUser().getId())
+          .validFrom(grant.getValidFrom())
           .expiresAt(grant.getExpiresAt())
           .createdAt(grant.getCreatedAt())
           .build();
@@ -105,6 +126,13 @@ public class AccessGrantService {
       throw e;
     } catch (IllegalArgumentException e) {
       throw e;
+    } catch (DataIntegrityViolationException e) {
+      log.warn(
+          "Grant violates DB constraint: {}",
+          e.getMostSpecificCause() != null
+              ? e.getMostSpecificCause().getMessage() : e.getMessage());
+      throw new ConflictException(
+          "Cannot create grant: an existing grant record still applies. Wait for cleanup or revoke the previous grant.");
     } catch (Exception e) {
       log.error("Grant access failed: {}", e.getMessage(), e);
       UUID forAudit = granteeUserId != null ? granteeUserId : grantedBy.getId();
@@ -115,10 +143,48 @@ public class AccessGrantService {
   }
 
   @Transactional
+  public AccessGrantResponse revokeAccessByGrantId(UUID grantId, User revokedBy,
+      String reason, String clientIp) {
+
+    AccessGrant grant = grantRepository.findById(grantId)
+        .orElseThrow(() -> new ResourceNotFoundException("Grant not found: " + grantId));
+
+    Document document = documentRepository.findByIdAndDeletedAtNull(grant.getDocument().getId())
+        .orElseThrow(() -> new ResourceNotFoundException(
+            "Document not found: " + grant.getDocument().getId()));
+
+    if (!isAuthorizedToGrant(document, revokedBy)) {
+      logAccessEvent(revokedBy.getId(), document.getId(), AccessAction.REVOKE,
+          AccessResult.FAILURE, clientIp, "Not authorized to revoke access");
+      throw new UnauthorizedException("Only document owner or ADMIN can revoke access");
+    }
+
+    if (Boolean.TRUE.equals(grant.getRevoked())) {
+      throw new ConflictException("Grant is already revoked");
+    }
+
+    grant.revoke(revokedBy, reason);
+    grantRepository.save(grant);
+
+    auditLogService.logRevoke(revokedBy.getId(), grant.getGranteeUser().getId(),
+        document.getId(), reason, clientIp, null);
+
+    return AccessGrantResponse.builder()
+        .grantId(grant.getId())
+        .documentId(document.getId())
+        .granteeUserId(grant.getGranteeUser().getId())
+        .grantedBy(grant.getGrantedByUser().getId())
+        .validFrom(grant.getValidFrom())
+        .expiresAt(grant.getExpiresAt())
+        .createdAt(grant.getCreatedAt())
+        .build();
+  }
+
+  @Transactional
   public AccessGrantResponse revokeAccess(UUID documentId, AccessRevokeRequest request,
       User revokedBy, String clientIp) {
 
-    UUID granteeUserId = resolveGranteeUserId(request);
+    UUID granteeUserId = resolveGranteeFromRevokeRequest(request);
 
     try {
       Document document = documentRepository.findByIdAndDeletedAtNull(documentId)
@@ -134,8 +200,7 @@ public class AccessGrantService {
 
       ZonedDateTime now = ZonedDateTime.now();
       AccessGrant grant = grantRepository
-          .findByDocumentIdAndGranteeUserIdAndRevokedFalseAndExpiresAtAfter(
-              documentId, granteeUserId, now)
+          .findRevocableGrant(documentId, granteeUserId, now)
           .orElseThrow(() -> new ResourceNotFoundException(
               "Active grant not found for document and grantee"));
 
@@ -150,6 +215,7 @@ public class AccessGrantService {
           .documentId(grant.getDocument().getId())
           .granteeUserId(grant.getGranteeUser().getId())
           .grantedBy(grant.getGrantedByUser().getId())
+          .validFrom(grant.getValidFrom())
           .expiresAt(grant.getExpiresAt())
           .createdAt(grant.getCreatedAt())
           .build();
@@ -164,52 +230,69 @@ public class AccessGrantService {
     }
   }
 
-  private UUID resolveGranteeUserId(AccessGrantRequest request) {
-    return resolveGranteeUserId(
-        request.getGranteeUserId(),
-        request.getGranteeUsername(),
-        request.getGranteeEmail());
-  }
-
-  private UUID resolveGranteeUserId(AccessRevokeRequest request) {
-    return resolveGranteeUserId(
-        request.getGranteeUserId(),
-        request.getGranteeUsername(),
-        request.getGranteeEmail());
-  }
-
-  private UUID resolveGranteeUserId(String granteeUserId, String granteeUsername,
-      String granteeEmail) {
-    int count = 0;
-    if (!isBlank(granteeUserId)) {
-      count++;
-    }
-    if (!isBlank(granteeUsername)) {
-      count++;
-    }
-    if (!isBlank(granteeEmail)) {
-      count++;
-    }
-    if (count != 1) {
-      throw new IllegalArgumentException(
-          "Provide exactly one of granteeUserId, granteeUsername, granteeEmail");
-    }
-    if (!isBlank(granteeUserId)) {
-      try {
-        return UUID.fromString(granteeUserId.trim());
-      } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException("Invalid granteeUserId UUID", e);
-      }
-    }
-    if (!isBlank(granteeUsername)) {
-      return userRepository.findByUsernameIgnoreCase(granteeUsername.trim())
-          .orElseThrow(() -> new ResourceNotFoundException(
-              "Grantee not found for username: " + granteeUsername.trim()))
-          .getId();
-    }
-    return userRepository.findByEmailIgnoreCase(granteeEmail.trim())
+  /**
+   * Permanently removes a grant row from the document.
+   * If the grant is still active (not revoked), logs a revoke first so access ends in audit.
+   */
+  @Transactional
+  public void deleteGrantForDocument(UUID documentId, UUID grantId, User deletedBy,
+      String clientIp) {
+    AccessGrant grant = grantRepository.findByDocument_IdAndId(documentId, grantId)
         .orElseThrow(() -> new ResourceNotFoundException(
-            "Grantee not found for email: " + granteeEmail.trim()))
+            "Grant not found for this document: " + grantId));
+
+    Document document = documentRepository.findByIdAndDeletedAtNull(documentId)
+        .orElseThrow(() -> new ResourceNotFoundException(
+            "Document not found: " + documentId));
+
+    if (isAuthorizedToGrant(document, deletedBy)) {
+      UUID granteeId = grant.getGranteeUser().getId();
+      if (!Boolean.TRUE.equals(grant.getRevoked())) {
+        auditLogService.logRevoke(deletedBy.getId(), granteeId, documentId,
+            "Grant removed — access revoked and record deleted", clientIp, null);
+      }
+      grantRepository.delete(grant);
+      return;
+    }
+
+    if (grant.getGranteeUser().getId().equals(deletedBy.getId())) {
+      ZonedDateTime now = ZonedDateTime.now();
+      boolean expired = !grant.getExpiresAt().isAfter(now);
+      boolean revoked = Boolean.TRUE.equals(grant.getRevoked());
+      if (!expired && !revoked) {
+        throw new UnauthorizedException(
+            "You can remove this entry only after your access has expired or been revoked");
+      }
+      grantRepository.delete(grant);
+      return;
+    }
+
+    logAccessEvent(deletedBy.getId(), documentId, AccessAction.REVOKE,
+        AccessResult.FAILURE, clientIp, "Not authorized to remove grant");
+    throw new UnauthorizedException(
+        "Only the document owner, an administrator, or the grantee (for expired "
+            + "or revoked grants) can remove grant records");
+  }
+
+  private UUID resolveGranteeUserFromUsername(AccessGrantRequest request) {
+    String username = request.getGranteeUsername();
+    if (isBlank(username)) {
+      throw new IllegalArgumentException("granteeUsername is required");
+    }
+    return userRepository.findByUsernameIgnoreCase(username.trim())
+        .orElseThrow(() -> new ResourceNotFoundException(
+            "Grantee not found for username: " + username.trim()))
+        .getId();
+  }
+
+  private UUID resolveGranteeFromRevokeRequest(AccessRevokeRequest request) {
+    String username = request.getGranteeUsername();
+    if (isBlank(username)) {
+      throw new IllegalArgumentException("granteeUsername is required");
+    }
+    return userRepository.findByUsernameIgnoreCase(username.trim())
+        .orElseThrow(() -> new ResourceNotFoundException(
+            "Grantee not found for username: " + username.trim()))
         .getId();
   }
 
@@ -227,16 +310,9 @@ public class AccessGrantService {
       AccessResult result, String clientIp, String reason) {
     try {
       AccessEventLog event = AccessEventLog.builder()
-          .user(userId != null ? new User() {
-            {
-              setId(userId);
-            }
-          } : null)
-          .document(documentId != null ? new Document() {
-            {
-              setId(documentId);
-            }
-          } : null)
+          .user(userId != null ? userRepository.getReferenceById(userId) : null)
+          .document(documentId != null ? documentRepository.getReferenceById(documentId)
+              : null)
           .action(action)
           .result(result)
           .ipAddress(clientIp)

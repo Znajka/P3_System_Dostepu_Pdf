@@ -8,7 +8,6 @@ import logging
 import os
 import re
 from typing import Optional, Dict, Any
-from datetime import datetime
 import jwt
 from jwt import PyJWTError
 
@@ -41,16 +40,17 @@ class JwtValidator:
             secret_key: JWT secret (shared between Spring Boot and FastAPI).
                        If None, loads from environment variable APP_JWT_SECRET.
         """
-        self.secret_key = secret_key or os.getenv(
-            "APP_JWT_SECRET", "change-me-in-production"
+        raw_secret = secret_key or os.getenv(
+            "APP_JWT_SECRET",
+            "dev-jwt-secret-min-32-chars-for-hs256-demo!!",
         )
+        self.secret_key = raw_secret.strip() if isinstance(raw_secret, str) else raw_secret
         self.algorithms = ["HS256", "HS512"]
         self.ip_pinning_enabled = os.getenv("APP_SECURITY_IP_PINNING_ENABLED", "true").lower() == "true"
 
-        if not self.secret_key or self.secret_key == "change-me-in-production":
+        if not self.secret_key:
             logger.warning(
-                "JWT secret not properly configured. Use APP_JWT_SECRET "
-                "environment variable."
+                "JWT secret not properly configured. Set APP_JWT_SECRET."
             )
 
     def validate_open_ticket_with_ip_pinning(
@@ -86,8 +86,8 @@ class JwtValidator:
                 if claim not in payload:
                     raise ValueError(f"Missing required claim: {claim}")
 
-            # Step 3: Validate audience
-            if payload.get("aud") != "pdf-microservice":
+            # Step 3: Validate audience (Java JWT libs may emit aud as string or list)
+            if not self._audience_is_pdf_microservice(payload):
                 raise ValueError(
                     f"Invalid audience: {payload.get('aud')}, expected 'pdf-microservice'"
                 )
@@ -139,7 +139,7 @@ class JwtValidator:
         for claim in required_claims:
             if claim not in payload:
                 raise ValueError(f"Missing required claim: {claim}")
-        if payload.get("aud") != "pdf-microservice":
+        if not self._audience_is_pdf_microservice(payload):
             raise ValueError("Invalid audience")
         if expected_document_id is not None and payload.get(
             "doc"
@@ -171,18 +171,51 @@ class JwtValidator:
             raise ValueError("Missing jti claim")
         return str(jti)
 
+    @staticmethod
+    def _audience_is_pdf_microservice(payload: Dict[str, Any]) -> bool:
+        aud = payload.get("aud")
+        expected = "pdf-microservice"
+        if aud is None:
+            return False
+        if isinstance(aud, str):
+            return aud == expected
+        if isinstance(aud, (list, tuple, set)):
+            return expected in {str(x) for x in aud}
+        return str(aud) == expected
+
     def _validate_token(self, token: str) -> Dict[str, Any]:
         """
         Validate JWT token and extract claims.
 
+        PyJWT decodes JWTs from Spring Boot (JJWT). Those tokens set {@code aud}.
+        If PyJWT tries to decode with {@code verify_aud} left at its default (
+        aligned with signature verification), it **requires an explicit audience
+        argument** otherwise it raises InvalidAudienceError while the issuer does
+        not provide one ("Invalid audience").
+        Spring stream tickets carry aud=pdf-microservice; we enforce that manually
+        in validate_open_ticket, so JWT library audience checks are disabled here.
+
         Raises:
             jwt.InvalidTokenError: if token is invalid
         """
+        if not token or not self.secret_key:
+            raise jwt.InvalidTokenError("Token or validator secret missing")
+
         try:
             payload = jwt.decode(
-                token, self.secret_key, algorithms=self.algorithms
+                token,
+                self.secret_key,
+                algorithms=self.algorithms,
+                leeway=120,
+                options={
+                    "verify_aud": False,
+                    "verify_signature": True,
+                    "verify_exp": True,
+                },
             )
-            logger.debug("Token validated successfully for user: %s", payload.get("sub"))
+            logger.debug(
+                "Token validated successfully for user: %s", payload.get("sub")
+            )
             return payload
 
         except jwt.ExpiredSignatureError:
@@ -205,10 +238,17 @@ class JwtValidator:
         Raises:
             ValueError: if IP mismatch detected
         """
-        # Check if IP pinning is enabled
-        ip_pinning_enabled = claims.get("ip_pinning_enabled", False)
+        # JSON may deserialize as bool; never treat non-empty string as "disabled"
+        raw_pin = claims.get("ip_pinning_enabled", False)
 
-        if not ip_pinning_enabled:
+        def pin_enabled(v) -> bool:
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, str):
+                return v.lower() == "true"
+            return bool(v)
+
+        if not pin_enabled(raw_pin):
             logger.debug("IP pinning not enabled for this ticket")
             return
 
@@ -260,9 +300,16 @@ class JwtValidator:
         if not ip:
             return ""
 
+        ip = ip.strip()
+
         # Remove IPv4-mapped IPv6 prefix
         if ip.startswith("::ffff:"):
-            return ip[7:]
+            ip = ip[7:]
+
+        # Treat common loopbacks as IPv4 localhost (ticket pinning across ::1 vs 127.0.0.1)
+        loopbacks_ipv6 = frozenset({"::1", "0:0:0:0:0:0:0:1"})
+        if ip in loopbacks_ipv6:
+            return "127.0.0.1"
 
         return ip
 

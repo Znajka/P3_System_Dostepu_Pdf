@@ -111,7 +111,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Arrange
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusDays(7),
               "Access for review"
           )
@@ -144,7 +144,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Arrange
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusDays(7),
               null
           )
@@ -171,7 +171,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Arrange
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusDays(7),
               null
           )
@@ -199,7 +199,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Grant access to authorized user
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusDays(7),
               null
           )
@@ -289,7 +289,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Grant access only to authorized user
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusDays(7),
               null
           )
@@ -359,7 +359,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Grant access with expiration in the past
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().minusMinutes(1), // Expired
               null
           )
@@ -376,7 +376,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Arrange: Grant access with future expiration
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusSeconds(2), // Expires in 2 seconds
               null
           )
@@ -412,7 +412,7 @@ class AccessGrantAndTicketIntegrationTest {
       // Grant access
       String grantRequestJson = objectMapper.writeValueAsString(
           new AccessGrantRequestDto(
-              authorizedUser.getId().toString(),
+              authorizedUser.getUsername(),
               ZonedDateTime.now().plusDays(7),
               null
           )
@@ -428,7 +428,7 @@ class AccessGrantAndTicketIntegrationTest {
 
       // Revoke the grant
       String revokeRequestJson = objectMapper.writeValueAsString(
-          new AccessRevokeRequestDto(authorizedUser.getId().toString(), "Testing revocation")
+          new AccessRevokeRequestDto(authorizedUser.getUsername(), "Testing revocation")
       );
 
       mockMvc
@@ -467,7 +467,7 @@ class AccessGrantAndTicketIntegrationTest {
               .contentType(MediaType.APPLICATION_JSON)
               .content(objectMapper.writeValueAsString(
                   new AccessGrantRequestDto(
-                      authorizedUser.getId().toString(),
+                      authorizedUser.getUsername(),
                       ZonedDateTime.now().plusDays(7),
                       null
                   )
@@ -481,7 +481,7 @@ class AccessGrantAndTicketIntegrationTest {
               .contentType(MediaType.APPLICATION_JSON)
               .content(objectMapper.writeValueAsString(
                   new AccessGrantRequestDto(
-                      unauthorizedUser.getId().toString(),
+                      unauthorizedUser.getUsername(),
                       ZonedDateTime.now().plusDays(7),
                       null
                   )
@@ -553,6 +553,7 @@ class AccessGrantAndTicketIntegrationTest {
 
   private Document createDocument(User owner, String title) {
     Document doc = Document.builder()
+        .id(UUID.randomUUID())
         .owner(owner)
         .title(title)
         .blobPath("/data/test-doc.pdf.enc")
@@ -587,24 +588,24 @@ class AccessGrantAndTicketIntegrationTest {
   // ============================================================================
 
   public static class AccessGrantRequestDto {
-    public String granteeUserId;
+    public String granteeUsername;
     public ZonedDateTime expiresAt;
     public String note;
 
-    public AccessGrantRequestDto(String granteeUserId, ZonedDateTime expiresAt,
+    public AccessGrantRequestDto(String granteeUsername, ZonedDateTime expiresAt,
         String note) {
-      this.granteeUserId = granteeUserId;
+      this.granteeUsername = granteeUsername;
       this.expiresAt = expiresAt;
       this.note = note;
     }
   }
 
   public static class AccessRevokeRequestDto {
-    public String granteeUserId;
+    public String granteeUsername;
     public String reason;
 
-    public AccessRevokeRequestDto(String granteeUserId, String reason) {
-      this.granteeUserId = granteeUserId;
+    public AccessRevokeRequestDto(String granteeUsername, String reason) {
+      this.granteeUsername = granteeUsername;
       this.reason = reason;
     }
   }

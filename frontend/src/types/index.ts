@@ -4,13 +4,16 @@
 
 export interface Document {
   documentId: string;
-  title: string;
-  ownerId: string;
-  createdAt: string;
-  accessible: boolean;
+  title?: string;
+  ownerId?: string;
+  createdAt?: string;
+  accessible?: boolean;
   access?: {
+    grantId?: string;
     granteeUserId: string;
+    validFrom?: string;
     expiresAt: string;
+    shareStatus?: string;
   };
 }
 

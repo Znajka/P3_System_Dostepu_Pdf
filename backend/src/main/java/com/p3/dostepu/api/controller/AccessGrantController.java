@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -30,8 +31,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Access Grant API controller: handles grant and revoke operations.
  * Endpoints:
- *   POST /api/documents/{id}/grant - grant access
- *   POST /api/documents/{id}/revoke - revoke access
+ *   POST /api/documents/{id}/grant — grant access ({@code validFrom} optional)
+ *   POST /api/documents/{id}/revoke — revoke by document + grantee username
+ *   DELETE /api/documents/{id}/grants/{grantId} — revoke (if needed) + remove grant row
+ *   POST /api/grants/{grantId}/revoke — revoke by grant id ({@link GrantRevokeController}).
  * Only document owner or ADMIN can grant/revoke (enforced in service).
  */
 @Slf4j
@@ -45,7 +48,7 @@ public class AccessGrantController {
 
   /**
    * POST /api/documents/{id}/grant - Grant document access to a user.
-   * Request body: granteeUserId, expiresAt (ISO 8601 UTC), optional note.
+   * Request body: granteeUsername, expiresAt (ISO 8601 UTC), optional validFrom/note.
    * Returns 200 OK with grant metadata.
    *
    * @param documentId document UUID (path parameter)
@@ -111,11 +114,12 @@ public class AccessGrantController {
 
   /**
    * POST /api/documents/{id}/revoke - Revoke document access from a user.
-   * Request body: granteeUserId (or grantId), optional reason.
+   * Request body: granteeUsername, optional reason. Alternative: revoke by grant id at
+   * {@code POST /api/grants/{grantId}/revoke}.
    * Returns 200 OK with revoke metadata.
    *
    * @param documentId document UUID (path parameter)
-   * @param request revoke request (granteeUserId, reason)
+   * @param request revoke request (granteeUsername, reason)
    * @param httpRequest HTTP request (for client IP extraction)
    * @return AccessGrantResponse with revoke metadata
    */
@@ -165,6 +169,54 @@ public class AccessGrantController {
       log.error("Revoke access failed: {}", e.getMessage(), e);
       return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
           .body(ErrorResponse.of("REVOKE_FAILED", "Failed to revoke access",
+              httpRequest.getHeader("X-Trace-ID")));
+    }
+  }
+
+  /**
+   * DELETE /api/documents/{id}/grants/{grantId} — remove grant record from the document (and
+   * revokes access first in audit if still active).
+   */
+  @DeleteMapping("/{id}/grants/{grantId}")
+  @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+  public ResponseEntity<?> deleteGrant(
+      @PathVariable("id") UUID documentId,
+      @PathVariable("grantId") UUID grantId,
+      HttpServletRequest httpRequest) {
+
+    try {
+      Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+      CustomUserDetails userDetails = (CustomUserDetails) auth.getPrincipal();
+      UUID userId = userDetails.getUserId();
+
+      User deletedBy = userRepository.findById(userId)
+          .orElseThrow(() -> new RuntimeException("Authenticated user not found"));
+
+      String clientIp = getClientIp(httpRequest);
+
+      log.info("Delete grant request: document={}, grantId={}, deletedBy={}",
+          documentId, grantId, userId);
+
+      grantService.deleteGrantForDocument(documentId, grantId, deletedBy, clientIp);
+
+      return ResponseEntity.noContent().build();
+
+    } catch (ResourceNotFoundException e) {
+      log.warn("Resource not found: {}", e.getMessage());
+      return ResponseEntity.status(HttpStatus.NOT_FOUND)
+          .body(ErrorResponse.of("NOT_FOUND", e.getMessage(),
+              httpRequest.getHeader("X-Trace-ID")));
+
+    } catch (UnauthorizedException e) {
+      log.warn("Unauthorized: {}", e.getMessage());
+      return ResponseEntity.status(HttpStatus.FORBIDDEN)
+          .body(ErrorResponse.of("FORBIDDEN", e.getMessage(),
+              httpRequest.getHeader("X-Trace-ID")));
+
+    } catch (Exception e) {
+      log.error("Delete grant failed: {}", e.getMessage(), e);
+      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+          .body(ErrorResponse.of("DELETE_GRANT_FAILED", "Failed to remove grant record",
               httpRequest.getHeader("X-Trace-ID")));
     }
   }

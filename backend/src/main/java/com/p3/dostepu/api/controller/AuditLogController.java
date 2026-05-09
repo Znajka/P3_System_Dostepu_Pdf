@@ -136,8 +136,8 @@ public class AuditLogController {
           offset);
 
       // Query events
-      Page<AccessEventLog> events = auditLogService.queryEvents(parsedDocumentId,
-          parsedUserId, parsedAction, parsedResult, from, to, offset / limit, limit);
+      Page<AccessEventLog> events = auditLogService.queryEvents(parsedUserId,
+          parsedDocumentId, parsedAction, parsedResult, from, to, offset / limit, limit);
 
       // Map to response DTO
       AccessEventLogResponse response = AccessEventLogResponse.builder()
@@ -150,6 +150,8 @@ public class AuditLogController {
                   .timestamp(event.getTimestampUtc())
                   .userId(
                       event.getUser() != null ? event.getUser().getId().toString() : null)
+                  .username(
+                      event.getUser() != null ? event.getUser().getUsername() : null)
                   .documentId(event.getDocument() != null
                       ? event.getDocument().getId().toString()
                       : null)

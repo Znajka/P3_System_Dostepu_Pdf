@@ -30,16 +30,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware (restrict to Spring Boot backend and frontend)
-allowed_origins = os.getenv(
-    "CORS_ORIGINS", "http://localhost:8080,http://localhost:3000"
+# CORS: SPA may be opened as localhost or 127.0.0.1; browser origin must match.
+_allowed = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:8080,http://localhost:3000,"
+    "http://127.0.0.1:8080,http://127.0.0.1:3000",
 ).split(",")
+allowed_origins = [o.strip() for o in _allowed if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 # Include routers

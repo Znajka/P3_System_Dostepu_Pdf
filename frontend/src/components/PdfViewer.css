@@ -12,11 +12,113 @@
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  /* Prevent text selection in viewer (discourage copy) */
+  /* Prevent text selection in viewer (discourage copy); password overlay allows input */
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+}
+
+/* Full-screen modal (portal to body) — avoids clipping by .pdf-viewer-container overflow:hidden */
+.pdf-password-overlay-fixed {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  user-select: text;
+  -webkit-user-select: text;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.pdf-password-dialog {
+  width: min(420px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid #e0e0e0;
+  padding: 20px 22px;
+  color: #1a1a1a;
+}
+
+.pdf-password-dialog h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.pdf-password-dialog p {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: #555;
+  line-height: 1.45;
+}
+
+.pdf-password-dialog label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #333;
+}
+
+.pdf-password-dialog input[type="password"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #bdbdbd;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.pdf-password-dialog input[type="password"]:focus {
+  outline: none;
+  border-color: #1976d2;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+}
+
+.pdf-password-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+.pdf-password-actions button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #bdbdbd;
+  background: #fafafa;
+  color: #333;
+}
+
+.pdf-password-actions button[type="submit"] {
+  background: #1976d2;
+  color: #fff;
+  border-color: #1565c0;
+}
+
+.pdf-password-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pdf-password-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #b71c1c;
+}
+
+.pdf-password-hint.pdf-password-hint--info {
+  color: #1565c0;
 }
 
 /**
@@ -178,6 +280,13 @@
   height: 100%;
   background-color: rgba(255, 255, 255, 0.8);
   gap: 16px;
+}
+
+/* Covers the viewer area without unmounting the canvas (fixes blank first page). */
+.loading-overlay--on-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
 }
 
 .spinner {

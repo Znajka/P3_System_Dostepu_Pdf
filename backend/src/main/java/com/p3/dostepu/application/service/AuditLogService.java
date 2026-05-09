@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.p3.dostepu.domain.entity.AccessAction;
@@ -17,6 +18,8 @@ import com.p3.dostepu.domain.entity.AccessResult;
 import com.p3.dostepu.domain.entity.Document;
 import com.p3.dostepu.domain.entity.User;
 import com.p3.dostepu.domain.repository.AccessEventLogRepository;
+import com.p3.dostepu.domain.repository.DocumentRepository;
+import com.p3.dostepu.domain.repository.UserRepository;
 import com.p3.dostepu.infrastructure.audit.AccessEventLogSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,13 +39,17 @@ import org.springframework.data.jpa.domain.Specification;
 public class AuditLogService {
 
   private final AccessEventLogRepository logRepository;
+  private final UserRepository userRepository;
+  private final DocumentRepository documentRepository;
   private final ObjectMapper objectMapper;
 
   /**
    * Log document upload event.
    *
-   * @param userId user performing upload
-   * @param documentId uploaded document
+   * @param user user performing upload (managed entity preferred; avoids transient FK stubs)
+   * @param persistedDocument nullable; when {@code success} is true must be the document row
+   *                          already persisted in this transaction (managed entity — not an id stub)
+   * @param documentId used in metadata when {@code persistedDocument} is null (failure before save)
    * @param fileSizeBytes file size in bytes
    * @param clientIp client IP address
    * @param userAgent user agent string
@@ -50,32 +57,34 @@ public class AuditLogService {
    * @param reason failure reason (if applicable)
    */
   @Transactional
-  public void logUpload(UUID userId, UUID documentId, Long fileSizeBytes, String clientIp,
-      String userAgent, boolean success, String reason) {
+  public void logUpload(User user, UUID documentId, Document persistedDocument,
+      Long fileSizeBytes, String clientIp, String userAgent, boolean success, String reason) {
+    UUID effectiveDocId =
+        persistedDocument != null ? persistedDocument.getId() : documentId;
+
     AccessEventLog event = AccessEventLog.builder()
-        .user(userId != null ? new User() {
-          {
-            setId(userId);
-          }
-        } : null)
-        .document(documentId != null ? new Document() {
-          {
-            setId(documentId);
-          }
-        } : null)
+        .user(user)
+        .document(success ? persistedDocument : null)
         .action(AccessAction.UPLOAD)
         .result(success ? AccessResult.SUCCESS : AccessResult.FAILURE)
         .ipAddress(clientIp)
         .userAgent(userAgent)
         .reason(reason)
-        .metadata(serializeMetadata("file_size_bytes", fileSizeBytes))
+        .metadata(success
+            ? serializeMetadata("file_size_bytes", fileSizeBytes,
+                "document_id",
+                effectiveDocId != null ? effectiveDocId.toString() : null)
+            : serializeMetadata("file_size_bytes", fileSizeBytes,
+                "attempted_document_id",
+                effectiveDocId != null ? effectiveDocId.toString() : null))
         .timestampUtc(ZonedDateTime.now())
         .build();
 
     logRepository.save(event);
     log.info(
         "Logged upload: user={}, document={}, status={}, size={}",
-        userId, documentId, (success ? "SUCCESS" : "FAILURE"), fileSizeBytes);
+        user != null ? user.getId() : null, effectiveDocId, (success ? "SUCCESS" : "FAILURE"),
+        fileSizeBytes);
   }
 
   /**
@@ -95,16 +104,11 @@ public class AuditLogService {
       ZonedDateTime expiresAt, String clientIp, String userAgent, boolean success,
       String reason) {
     AccessEventLog event = AccessEventLog.builder()
-        .user(grantedByUserId != null ? new User() {
-          {
-            setId(grantedByUserId);
-          }
-        } : null)
-        .document(documentId != null ? new Document() {
-          {
-            setId(documentId);
-          }
-        } : null)
+        .user(
+            grantedByUserId != null ? userRepository.getReferenceById(grantedByUserId)
+                : null)
+        .document(
+            documentId != null ? documentRepository.getReferenceById(documentId) : null)
         .action(AccessAction.GRANT)
         .result(success ? AccessResult.SUCCESS : AccessResult.FAILURE)
         .ipAddress(clientIp)
@@ -136,16 +140,10 @@ public class AuditLogService {
   public void logRevoke(UUID revokedByUserId, UUID revokedFromUserId, UUID documentId,
       String revokeReason, String clientIp, String userAgent) {
     AccessEventLog event = AccessEventLog.builder()
-        .user(revokedByUserId != null ? new User() {
-          {
-            setId(revokedByUserId);
-          }
-        } : null)
-        .document(documentId != null ? new Document() {
-          {
-            setId(documentId);
-          }
-        } : null)
+        .user(revokedByUserId != null ? userRepository.getReferenceById(revokedByUserId)
+            : null)
+        .document(
+            documentId != null ? documentRepository.getReferenceById(documentId) : null)
         .action(AccessAction.REVOKE)
         .result(AccessResult.SUCCESS)
         .ipAddress(clientIp)
@@ -175,16 +173,9 @@ public class AuditLogService {
   public void logOpenAttempt(UUID userId, UUID documentId, String clientIp,
       String userAgent, boolean success, String reason) {
     AccessEventLog event = AccessEventLog.builder()
-        .user(userId != null ? new User() {
-          {
-            setId(userId);
-          }
-        } : null)
-        .document(documentId != null ? new Document() {
-          {
-            setId(documentId);
-          }
-        } : null)
+        .user(userId != null ? userRepository.getReferenceById(userId) : null)
+        .document(documentId != null ? documentRepository.getReferenceById(documentId)
+            : null)
         .action(AccessAction.OPEN_ATTEMPT)
         .result(success ? AccessResult.SUCCESS : AccessResult.FAILURE)
         .ipAddress(clientIp)
@@ -200,6 +191,32 @@ public class AuditLogService {
   }
 
   /**
+   * Persist OPEN_ATTEMPT FAILURE in a separate transaction so it survives rollback when the caller
+   * (e.g. {@code issueAccessTicket}) aborts due to UnauthorizedException or error.
+   * Inlined persistence (cannot delegate to {@link #logOpenAttempt} — same-bean txn proxy skip).
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void logOpenAttemptFailurePersisted(UUID userId, UUID documentId, String clientIp,
+      String userAgent, String reason) {
+    AccessEventLog event = AccessEventLog.builder()
+        .user(userId != null ? userRepository.getReferenceById(userId) : null)
+        .document(documentId != null ? documentRepository.getReferenceById(documentId)
+            : null)
+        .action(AccessAction.OPEN_ATTEMPT)
+        .result(AccessResult.FAILURE)
+        .ipAddress(clientIp)
+        .userAgent(userAgent)
+        .reason(reason)
+        .timestampUtc(ZonedDateTime.now())
+        .build();
+
+    logRepository.save(event);
+    log.info(
+        "Logged open_attempt: user={}, document={}, status=FAILURE, reason={}",
+        userId, documentId, reason);
+  }
+
+  /**
    * Log stream start event (FastAPI begins streaming decrypted PDF).
    *
    * @param userId user streaming
@@ -212,16 +229,9 @@ public class AuditLogService {
   public void logStreamStart(UUID userId, UUID documentId, String ticketNonce,
       String clientIp, String userAgent) {
     AccessEventLog event = AccessEventLog.builder()
-        .user(userId != null ? new User() {
-          {
-            setId(userId);
-          }
-        } : null)
-        .document(documentId != null ? new Document() {
-          {
-            setId(documentId);
-          }
-        } : null)
+        .user(userId != null ? userRepository.getReferenceById(userId) : null)
+        .document(documentId != null ? documentRepository.getReferenceById(documentId)
+            : null)
         .action(AccessAction.STREAM_START)
         .result(AccessResult.SUCCESS)
         .ipAddress(clientIp)
@@ -253,16 +263,9 @@ public class AuditLogService {
       Long bytesStreamed, boolean success, String reason, String clientIp,
       String userAgent) {
     AccessEventLog event = AccessEventLog.builder()
-        .user(userId != null ? new User() {
-          {
-            setId(userId);
-          }
-        } : null)
-        .document(documentId != null ? new Document() {
-          {
-            setId(documentId);
-          }
-        } : null)
+        .user(userId != null ? userRepository.getReferenceById(userId) : null)
+        .document(documentId != null ? documentRepository.getReferenceById(documentId)
+            : null)
         .action(AccessAction.STREAM_END)
         .result(success ? AccessResult.SUCCESS : AccessResult.FAILURE)
         .ipAddress(clientIp)

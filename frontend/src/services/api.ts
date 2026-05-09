@@ -5,7 +5,13 @@
 import axios, { AxiosInstance, AxiosError } from "axios";
 
 const SPRING_BOOT_BASE_URL = process.env.REACT_APP_SPRING_BOOT_URL ?? "";
-const FASTAPI_BASE_URL = process.env.REACT_APP_FASTAPI_URL ?? "";
+
+/** Same-tab login/logout does not fire `storage`; App listens for this to refresh auth state. */
+function emitAccessTokenChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("p3-access-token-changed"));
+  }
+}
 
 export interface LoginResponse {
   userId: string;
@@ -21,6 +27,11 @@ export interface DocumentSummary {
   title: string;
   ownerId: string;
   createdAt: string;
+  /** Filled when listing with scope=shared */
+  grantId?: string;
+  validFrom?: string;
+  expiresAt?: string;
+  shareStatus?: string;
 }
 
 export interface EncryptionMetadata {
@@ -30,9 +41,57 @@ export interface EncryptionMetadata {
   algorithm?: string;
 }
 
+/** Grant row returned to document owner/admin from GET /api/documents/{id}/status */
+export interface DocumentGrantShare {
+  grantId: string;
+  granteeUserId: string;
+  granteeUsername?: string | null;
+  granteeEmail?: string | null;
+  validFrom: string;
+  expiresAt: string;
+  revoked?: boolean | null;
+  shareStatus: string;
+}
+
+export interface DocumentStatus {
+  documentId: string;
+  title?: string;
+  ownerId?: string;
+  createdAt?: string;
+  accessible?: boolean;
+  grants?: DocumentGrantShare[];
+  locked?: boolean;
+  access?: {
+    grantId?: string;
+    granteeUserId: string;
+    validFrom: string;
+    expiresAt: string;
+    shareStatus?: string;
+  };
+}
+
+export interface AccessEventEntry {
+  id: string;
+  timestamp: string;
+  userId: string | null;
+  username?: string | null;
+  documentId: string | null;
+  action: string;
+  result: string;
+  ip: string | null;
+  reason: string | null;
+  metadata: string | null;
+}
+
+export interface AccessEventLogPage {
+  total: number;
+  limit: number;
+  offset: number;
+  events: AccessEventEntry[];
+}
+
 class ApiClient {
   private springBootClient: AxiosInstance;
-  private fastApiClient: AxiosInstance;
 
   constructor() {
     const springBase =
@@ -49,21 +108,6 @@ class ApiClient {
       },
     });
 
-    const fastBase =
-      FASTAPI_BASE_URL.length > 0
-        ? FASTAPI_BASE_URL
-        : typeof window !== "undefined"
-          ? ""
-          : "http://localhost:8443";
-    this.fastApiClient = axios.create({
-      baseURL: fastBase,
-      timeout: 120000,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      withCredentials: false,
-    });
-
     const bearer = (): string | null => {
       if (typeof window === "undefined") return null;
       return localStorage.getItem("accessToken");
@@ -73,14 +117,22 @@ class ApiClient {
       const token = bearer();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+      } else if (config.headers) {
+        const h = config.headers;
+        if (typeof h.delete === "function") {
+          h.delete("Authorization");
+        } else {
+          delete (h as Record<string, unknown>)["Authorization"];
+        }
       }
-      return config;
-    });
-
-    this.fastApiClient.interceptors.request.use((config) => {
-      const token = bearer();
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      // Instance default is application/json — breaks multipart uploads (415).
+      if (config.data instanceof FormData && config.headers) {
+        const h = config.headers;
+        if (typeof h.delete === "function") {
+          h.delete("Content-Type");
+        } else {
+          delete (h as Record<string, unknown>)["Content-Type"];
+        }
       }
       return config;
     });
@@ -119,9 +171,26 @@ class ApiClient {
     return t;
   }
 
-  async getDocumentStatus(documentId: string): Promise<any> {
-    const response = await this.springBootClient.get(
+  async getDocumentStatus(documentId: string): Promise<DocumentStatus> {
+    const response = await this.springBootClient.get<DocumentStatus>(
       `/api/documents/${documentId}/status`
+    );
+    return response.data;
+  }
+
+  async getAccessEventLogs(params?: {
+    limit?: number;
+    offset?: number;
+    documentId?: string;
+    userId?: string;
+    action?: string;
+    result?: string;
+    from?: string;
+    to?: string;
+  }): Promise<AccessEventLogPage> {
+    const response = await this.springBootClient.get<AccessEventLogPage>(
+      "/api/logs/access-events",
+      { params: params ?? {} }
     );
     return response.data;
   }
@@ -133,20 +202,18 @@ class ApiClient {
     tag: string,
     chunkSize: number = 65536
   ): Promise<ArrayBuffer> {
-    const encTicket = encodeURIComponent(ticket);
-    const response = await this.fastApiClient.get(
-      `/stream/${encTicket}`,
-      {
-        headers: {
-          "X-DEK": dek,
-          "X-Nonce": nonce,
-          "X-Tag": tag,
-          "X-Chunk-Size": chunkSize.toString(),
-        },
-        responseType: "arraybuffer",
-        timeout: 120000,
-      }
-    );
+    // Ticket in header: long JWT in query can be truncated/decoded badly (401 from FastAPI).
+    const response = await this.springBootClient.get("/api/stream/pdf", {
+      headers: {
+        "X-Document-Stream-Ticket": ticket,
+        "X-DEK": dek,
+        "X-Nonce": nonce,
+        "X-Tag": tag,
+        "X-Chunk-Size": chunkSize.toString(),
+      },
+      responseType: "arraybuffer",
+      timeout: 120000,
+    });
     this.validateSecurityHeaders(response.headers);
     return response.data as ArrayBuffer;
   }
@@ -158,43 +225,56 @@ class ApiClient {
     return response.data as EncryptionMetadata;
   }
 
-  async listDocuments(page: number = 0, size: number = 20): Promise<DocumentSummary[]> {
+  async listDocuments(
+    page: number = 0,
+    size: number = 20,
+    scope: "accessible" | "owned" | "shared" = "accessible"
+  ): Promise<DocumentSummary[]> {
     const response = await this.springBootClient.get("/api/documents", {
-      params: { page, size },
+      params: { page, size, scope },
     });
     const rows = response.data as any[];
     return (rows || []).map((d) => ({
-      documentId: d.documentId,
+      documentId:
+        typeof d.documentId === "string" ? d.documentId : String(d.documentId),
       title: d.title,
-      ownerId: d.ownerId,
+      ownerId:
+        typeof d.ownerId === "string" ? d.ownerId : String(d.ownerId ?? ""),
       createdAt: d.createdAt,
+      grantId:
+        d.grantId !== undefined && d.grantId !== null ? String(d.grantId) : undefined,
+      validFrom: d.validFrom,
+      expiresAt: d.expiresAt,
+      shareStatus: d.shareStatus,
     }));
   }
 
-  async uploadPdf(file: File, title: string, description?: string): Promise<{ documentId: string }> {
+  async uploadPdf(file: File, description?: string): Promise<{ documentId: string }> {
     const fd = new FormData();
-    fd.append("title", title);
     if (description) {
       fd.append("description", description);
     }
     fd.append("file", file);
-    const response = await this.springBootClient.post("/api/documents", fd, {
-      timeout: 120000,
-    });
-    const data = response.data as { documentId?: string };
-    if (!data.documentId) {
-      throw new Error("Upload response missing documentId");
+    try {
+      const response = await this.springBootClient.post("/api/documents", fd, {
+        timeout: 120000,
+      });
+      const data = response.data as { documentId?: string };
+      if (!data.documentId) {
+        throw new Error("Upload response missing documentId");
+      }
+      return { documentId: data.documentId };
+    } catch (e) {
+      throw this.handleError(e);
     }
-    return { documentId: data.documentId };
   }
 
   async grantAccess(
     documentId: string,
     body: {
-      granteeUserId?: string;
-      granteeUsername?: string;
-      granteeEmail?: string;
+      granteeUsername: string;
       expiresAt: string;
+      validFrom?: string;
       note?: string;
     }
   ): Promise<void> {
@@ -204,13 +284,22 @@ class ApiClient {
   async revokeAccess(
     documentId: string,
     body: {
-      granteeUserId?: string;
-      granteeUsername?: string;
-      granteeEmail?: string;
+      granteeUsername: string;
       reason?: string;
     }
   ): Promise<void> {
     await this.springBootClient.post(`/api/documents/${documentId}/revoke`, body);
+  }
+
+  /** Remove grant row; if still active, access is revoked first (audit). */
+  async deleteGrant(documentId: string, grantId: string): Promise<void> {
+    try {
+      await this.springBootClient.delete(
+        `/api/documents/${documentId}/grants/${grantId}`
+      );
+    } catch (e) {
+      throw this.handleError(e);
+    }
   }
 
   private validateSecurityHeaders(headers: Record<string, any>): void {
@@ -228,12 +317,20 @@ class ApiClient {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
       const body = axiosError.response?.data as any;
+      const detail = body?.detail;
+      const detailStr =
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: any) => d?.msg || String(d)).join("; ")
+            : "";
       const msg =
         body?.error?.message ||
+        detailStr ||
         body?.message ||
         axiosError.response?.statusText ||
         axiosError.message;
-      return new Error(`API Error: ${msg}`);
+      return new Error(msg || "Request failed");
     }
     return error instanceof Error ? error : new Error("Unknown error");
   }
@@ -244,14 +341,39 @@ class ApiClient {
     });
   }
 
+  /**
+   * Sync axios defaults from localStorage without emitting auth events (for App.tsx sync).
+   */
+  applyAuthSnapshotFromStorage(): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const t = localStorage.getItem("accessToken");
+    if (t) {
+      this.springBootClient.defaults.headers.common["Authorization"] = `Bearer ${t}`;
+    } else {
+      delete this.springBootClient.defaults.headers.common["Authorization"];
+    }
+  }
+
   setAuthToken(token: string): void {
+    const prev =
+      typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
     localStorage.setItem("accessToken", token);
     this.springBootClient.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    if (prev !== token) {
+      emitAccessTokenChanged();
+    }
   }
 
   clearAuthToken(): void {
+    const prev =
+      typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
     localStorage.removeItem("accessToken");
     delete this.springBootClient.defaults.headers.common["Authorization"];
+    if (prev !== null) {
+      emitAccessTokenChanged();
+    }
   }
 }
 

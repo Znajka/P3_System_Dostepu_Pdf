@@ -1,0 +1,5 @@
+openssl req -new -x509 -days 365 -nodes -out certs/ca.crt -keyout certs/ca.key -subj "/CN=p3-ca"
+
+openssl req -new -nodes -out certs/spring-boot.csr -keyout certs/spring-boot.key -subj "/CN=spring-boot-backend"
+
+openssl x509 -req -in certs/spring-boot.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/spring-boot.crt -days 365

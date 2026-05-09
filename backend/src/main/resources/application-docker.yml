@@ -2,7 +2,7 @@ spring:
   datasource:
     url: jdbc:postgresql://postgres:5432/${POSTGRES_DB:p3_system_db}
     username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD}
+    password: ${POSTGRES_PASSWORD:devpostgres}
 
 storage:
   type: ${STORAGE_TYPE:local}
@@ -11,7 +11,7 @@ storage:
 
 fastapi:
   service:
-    url: ${FASTAPI_SERVICE_URL:https://fastapi-pdf-service:8443}
+    url: ${FASTAPI_SERVICE_URL:http://fastapi-pdf-service:8443}
     mtls:
       cert: ${FASTAPI_MTLS_CERT:/etc/p3/certs/spring-boot.crt}
       key: ${FASTAPI_MTLS_KEY:/etc/p3/certs/spring-boot.key}

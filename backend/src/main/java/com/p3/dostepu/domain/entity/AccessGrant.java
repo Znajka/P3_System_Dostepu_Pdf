@@ -56,6 +56,11 @@ public class AccessGrant {
   @JoinColumn(name = "granted_by_user_id", nullable = false)
   private User grantedByUser;
 
+  /** Inclusive start of access window (UTC). Opening is allowed when now is in [validFrom, expiresAt). */
+  @NotNull
+  @Column(name = "valid_from", nullable = false)
+  private ZonedDateTime validFrom;
+
   @NotNull
   @Column(nullable = false)
   private ZonedDateTime expiresAt;
@@ -83,7 +88,8 @@ public class AccessGrant {
   private ZonedDateTime updatedAt;
 
   public boolean isActive() {
-    return !revoked && expiresAt.isAfter(ZonedDateTime.now());
+    ZonedDateTime now = ZonedDateTime.now();
+    return !revoked && !validFrom.isAfter(now) && expiresAt.isAfter(now);
   }
 
   public void revoke(User revokedBy, String reason) {

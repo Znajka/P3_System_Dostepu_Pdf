@@ -15,19 +15,16 @@ public class DevUserSeeder {
   @Bean
   CommandLineRunner seedUsers(UserRepository userRepository, PasswordEncoder passwordEncoder) {
     return args -> {
+      // Docker/local demo: 1 admin + 4 users (password = username + "123")
       upsertUser(userRepository, passwordEncoder, "admin", "admin@p3.local", "admin123",
           Set.of(UserRole.ADMIN));
-      upsertUser(userRepository, passwordEncoder, "owner1", "owner1@p3.local", "owner123",
+      upsertUser(userRepository, passwordEncoder, "alice", "alice@p3.local", "alice123",
           Set.of(UserRole.USER));
-      upsertUser(userRepository, passwordEncoder, "owner2", "owner2@p3.local", "owner123",
+      upsertUser(userRepository, passwordEncoder, "bob", "bob@p3.local", "bob123",
           Set.of(UserRole.USER));
-      upsertUser(userRepository, passwordEncoder, "owner3", "owner3@p3.local", "owner123",
+      upsertUser(userRepository, passwordEncoder, "carol", "carol@p3.local", "carol123",
           Set.of(UserRole.USER));
-      upsertUser(userRepository, passwordEncoder, "user1", "user1@p3.local", "user123",
-          Set.of(UserRole.USER));
-      upsertUser(userRepository, passwordEncoder, "user2", "user2@p3.local", "user123",
-          Set.of(UserRole.USER));
-      upsertUser(userRepository, passwordEncoder, "user3", "user3@p3.local", "user123",
+      upsertUser(userRepository, passwordEncoder, "dave", "dave@p3.local", "dave123",
           Set.of(UserRole.USER));
     };
   }

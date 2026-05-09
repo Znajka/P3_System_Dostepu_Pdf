@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/internal", tags=["internal"])
 
 
+def _chmod_best_effort(path: str, mode: int) -> None:
+    """Skip chmod failures (common on Docker bind mounts from Windows/macOS hosts)."""
+    try:
+        os.chmod(path, mode)
+    except OSError as e:
+        logger.warning("chmod skipped for %s: %s", path, e)
+
+
 def verify_service_token(x_service_id: str = Header(None)) -> str:
     """
     Verify service-to-service authentication.
@@ -123,22 +131,19 @@ async def encrypt_pdf_internal(
         # Step 4: Create secure storage directory
         try:
             Path(storage_path).mkdir(parents=True, exist_ok=True)
-            # Restrict permissions: owner read/write only
-            os.chmod(storage_path, 0o700)
         except Exception as e:
             logger.error("Failed to create storage directory: %s", str(e))
             raise HTTPException(status_code=500, detail="Storage setup failed")
+        _chmod_best_effort(storage_path, 0o700)
 
         # Step 5: Save encrypted blob to secure location
         blob_filename = f"{document_id}.pdf.enc"
         blob_path = os.path.join(storage_path, blob_filename)
 
         try:
-            # Write encrypted blob with restricted permissions
             with open(blob_path, "wb") as f:
                 f.write(ciphertext)
-            # Restrict permissions: owner read/write only (0o600)
-            os.chmod(blob_path, 0o600)
+            _chmod_best_effort(blob_path, 0o600)
             logger.info("Saved encrypted blob: %s (size=%d bytes)", blob_path,
                        len(ciphertext))
         except Exception as e:

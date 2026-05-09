@@ -24,6 +24,7 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
       SELECT DISTINCT d FROM Document d
       LEFT JOIN AccessGrant g ON g.document = d
         AND g.revoked = false
+        AND g.validFrom <= :now
         AND g.expiresAt > :now
         AND g.granteeUser.id = :userId
       WHERE d.deletedAt IS NULL
@@ -31,4 +32,19 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
       """)
   Page<Document> findAccessibleForUser(@Param("userId") UUID userId,
       @Param("now") ZonedDateTime now, Pageable pageable);
+
+  @Query("""
+      SELECT d FROM Document d
+      WHERE d.deletedAt IS NULL AND d.owner.id = :userId
+      """)
+  Page<Document> findOwnedByUser(@Param("userId") UUID userId, Pageable pageable);
+
+  /** Includes active, pending, and expired grants (grantee-only; revoked rows excluded). */
+  @Query("""
+      SELECT DISTINCT d FROM Document d JOIN d.accessGrants g
+      WHERE d.deletedAt IS NULL
+        AND d.owner.id <> :userId
+        AND g.granteeUser.id = :userId AND g.revoked = false
+      """)
+  Page<Document> findSharedWithUser(@Param("userId") UUID userId, Pageable pageable);
 }

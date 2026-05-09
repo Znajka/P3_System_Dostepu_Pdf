@@ -14,10 +14,6 @@ export default defineConfig({
         target: "http://localhost:8080",
         changeOrigin: true,
       },
-      "/stream": {
-        target: "http://localhost:8443",
-        changeOrigin: true,
-      },
     },
   },
   build: {
@@ -28,9 +24,6 @@ export default defineConfig({
   define: {
     "process.env.REACT_APP_SPRING_BOOT_URL": JSON.stringify(
       process.env.REACT_APP_SPRING_BOOT_URL ?? ""
-    ),
-    "process.env.REACT_APP_FASTAPI_URL": JSON.stringify(
-      process.env.REACT_APP_FASTAPI_URL ?? ""
     ),
   },
 });

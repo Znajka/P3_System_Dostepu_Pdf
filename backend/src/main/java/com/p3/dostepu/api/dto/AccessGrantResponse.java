@@ -32,6 +32,9 @@ public class AccessGrantResponse {
   @JsonProperty("grantedBy")
   private UUID grantedBy;
 
+  @JsonProperty("validFrom")
+  private ZonedDateTime validFrom;
+
   @JsonProperty("expiresAt")
   private ZonedDateTime expiresAt;
 

@@ -17,6 +17,21 @@
 import React, { useEffect, useRef, useState, ReactNode } from "react";
 import "./SecureViewerWrapper.css";
 
+/**
+ * Allows DevTools shortcuts and drops window-size probing.
+ * True for Vite dev, optional `VITE_SECURE_VIEWER_RELAX` build flag, or when the SPA is
+ * served from localhost/127.0.0.1 (typical Docker port-forward / local JAR demo).
+ */
+const isViewerLocalHost =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
+const RELAX_SECURE_VIEWER =
+  import.meta.env.DEV ||
+  import.meta.env.VITE_SECURE_VIEWER_RELAX === "true" ||
+  isViewerLocalHost;
+
 interface SecureViewerWrapperProps {
   children: ReactNode;
   documentId: string;
@@ -165,25 +180,27 @@ export const SecureViewerWrapper: React.FC<SecureViewerWrapperProps> = ({
         return false;
       }
 
-      // Block developer tools (F12, Ctrl+Shift+I, Cmd+Option+I)
-      if (
-        e.key === "F12" ||
-        (isCtrlOrCmd && isShift && (e.key === "i" || e.key === "I")) ||
-        (isCtrlOrCmd && isShift && (e.key === "c" || e.key === "C")) ||
-        (isCtrlOrCmd && isShift && (e.key === "j" || e.key === "J")) ||
-        (isCtrlOrCmd && isAlt && (e.key === "i" || e.key === "I"))
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
+      if (!RELAX_SECURE_VIEWER) {
+        // Block developer tools (F12, Ctrl+Shift+I, Cmd+Option+I)
+        if (
+          e.key === "F12" ||
+          (isCtrlOrCmd && isShift && (e.key === "i" || e.key === "I")) ||
+          (isCtrlOrCmd && isShift && (e.key === "c" || e.key === "C")) ||
+          (isCtrlOrCmd && isShift && (e.key === "j" || e.key === "J")) ||
+          (isCtrlOrCmd && isAlt && (e.key === "i" || e.key === "I"))
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
 
-        logViolation({
-          type: "developer-tools",
-          timestamp: new Date(),
-          details: e.key,
-        });
+          logViolation({
+            type: "developer-tools",
+            timestamp: new Date(),
+            details: e.key,
+          });
 
-        showNotice("🔒 Developer tools are disabled");
-        return false;
+          showNotice("🔒 Developer tools are disabled");
+          return false;
+        }
       }
 
       // Block quit/close (Cmd+Q on macOS)
@@ -281,6 +298,10 @@ export const SecureViewerWrapper: React.FC<SecureViewerWrapperProps> = ({
    * Detect and block developer tools opening (F12, Inspector, etc.).
    */
   useEffect(() => {
+    if (RELAX_SECURE_VIEWER) {
+      return undefined;
+    }
+
     let devToolsOpen = false;
 
     const detectDevTools = () => {
@@ -322,6 +343,10 @@ export const SecureViewerWrapper: React.FC<SecureViewerWrapperProps> = ({
    * Prevent access to page source and document properties.
    */
   useEffect(() => {
+    if (RELAX_SECURE_VIEWER) {
+      return undefined;
+    }
+
     const handleKeyDownGlobal = (e: KeyboardEvent) => {
       // Block view page source (Ctrl+U, Cmd+Option+U)
       if ((e.ctrlKey || e.metaKey) && (e.altKey || e.shiftKey) && e.key === "u") {
@@ -377,6 +402,10 @@ export const SecureViewerWrapper: React.FC<SecureViewerWrapperProps> = ({
    * Prevent inspector element selection.
    */
   useEffect(() => {
+    if (RELAX_SECURE_VIEWER) {
+      return undefined;
+    }
+
     const handleInspect = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === "c") {
         e.preventDefault();

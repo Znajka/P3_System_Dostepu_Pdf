@@ -1,16 +1,28 @@
 # Build from repository root (see docker-compose context: .)
 # Frontend -> Spring static resources; single JAR serves API + SPA on :8080
 
-# -------- Frontend (Vite / React) --------
-FROM node:20-alpine AS frontend
+# Debian-based Node: fewer hangs than Alpine+mirror during npm (DNS / musl / optional builds).
+FROM node:20-bookworm-slim AS frontend
 WORKDIR /fe
-COPY frontend/package.json ./
-RUN npm install
+
+ENV NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_PROGRESS=false \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
+
+COPY frontend/package.json frontend/package-lock.json ./
+# Do not use --omit=optional: Rollup/Vite need platform-specific optional binaries (e.g. @rollup/rollup-linux-x64-gnu).
+RUN npm ci
+
 COPY frontend/ ./
-# Browser calls FastAPI on host-mapped port when using Docker Desktop
-ARG REACT_APP_FASTAPI_URL=http://localhost:8443
-ENV REACT_APP_FASTAPI_URL=${REACT_APP_FASTAPI_URL}
-RUN npm run build
+
+# Bust Docker layer cache when frontend changes are not picked up (optional):
+#   docker compose build --no-cache spring-boot-backend
+#   or: docker compose build --build-arg FRONTEND_CACHE_BUST=$(date +%s) spring-boot-backend
+ARG FRONTEND_CACHE_BUST=0
+RUN echo "frontend cache bust: ${FRONTEND_CACHE_BUST}" && npm run build
 
 # -------- Spring Boot (packages static/ from frontend dist) --------
 FROM maven:3.9-eclipse-temurin-21 AS builder

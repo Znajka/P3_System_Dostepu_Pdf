@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-p3_system_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error - POSTGRES_PASSWORD required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpostgres}
       POSTGRES_INITDB_ARGS: "-c timezone=UTC"
     ports:
       - "5432:5432"
@@ -32,20 +32,18 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.springboot
-      args:
-        REACT_APP_FASTAPI_URL: ${REACT_APP_FASTAPI_URL:-http://localhost:8443}
     container_name: p3-spring-boot
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-p3_system_db}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?error - POSTGRES_PASSWORD required}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-devpostgres}
       SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_DDL_AUTO:-validate}
       SPRING_JPA_PROPERTIES_HIBERNATE_JDBC_BATCH_SIZE: 20
       SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_INSERTS: 'true'
       SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_UPDATES: 'true'
       # Security & JWT
-      APP_JWT_SECRET: ${APP_JWT_SECRET:?error - APP_JWT_SECRET required}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-dev-jwt-secret-min-32-chars-for-hs256-demo!!}
       APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-3600000}
       APP_REFRESH_TOKEN_EXPIRATION_MS: ${APP_REFRESH_TOKEN_EXPIRATION_MS:-604800000}
       APP_INTERNAL_API_KEY: ${APP_INTERNAL_API_KEY:-dev-p3-internal-api-key}
@@ -53,7 +51,7 @@ services:
       # KMS (Key Management Service) - envelope encryption for DEKs
       KMS_PROVIDER: ${KMS_PROVIDER:-vault}
       KMS_ENDPOINT: ${KMS_ENDPOINT:-http://vault:8200}
-      KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:?error - KMS_AUTH_TOKEN required}
+      KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:-root-token}
       # FastAPI microservice mTLS/service-to-service
       FASTAPI_SERVICE_URL: http://fastapi-pdf-service:8443
       # Security: rate-limiting, lockout
@@ -69,10 +67,13 @@ services:
       APP_AUDIT_LOG_ENABLED: 'true'
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 18
+      start_period: 120s
     volumes:
-      - ./backend/src:/app/src:ro
-      - ./backend/pom.xml:/app/pom.xml:ro
-      - ./backend/db/migrations:/app/migrations:ro
       - ./data/encrypted-documents:/data/encrypted-documents
     depends_on:
       postgres:
@@ -99,7 +100,7 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       FASTAPI_ENV: ${FASTAPI_ENV:-docker}
-      APP_JWT_SECRET: ${APP_JWT_SECRET:?error - APP_JWT_SECRET required}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-dev-jwt-secret-min-32-chars-for-hs256-demo!!}
       APP_INTERNAL_API_KEY: ${APP_INTERNAL_API_KEY:-dev-p3-internal-api-key}
       APP_SECURITY_IP_PINNING_ENABLED: ${APP_SECURITY_IP_PINNING_ENABLED:-false}
       # Spring Boot backend URL (for ticket replay + KMS-style calls)
@@ -107,7 +108,7 @@ services:
       # KMS endpoint
       KMS_PROVIDER: ${KMS_PROVIDER:-vault}
       KMS_ENDPOINT: ${KMS_ENDPOINT:-http://vault:8200}
-      KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:?error - KMS_AUTH_TOKEN required}
+      KMS_AUTH_TOKEN: ${KMS_AUTH_TOKEN:-root-token}
       # Storage
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       STORAGE_LOCAL_PATH: /data/encrypted-documents
@@ -120,10 +121,13 @@ services:
     volumes:
       - ./backend/pdf-microservice/app:/app/app:ro
       - ./backend/pdf-microservice/requirements.txt:/app/requirements.txt:ro
-      - ./data/encrypted-documents:/data/encrypted-documents:ro
+      # Read-write: FastAPI encrypts here; Spring reads the same paths (shared volume).
+      - ./data/encrypted-documents:/data/encrypted-documents
     depends_on:
-      - spring-boot-backend
-      - vault
+      spring-boot-backend:
+        condition: service_healthy
+      vault:
+        condition: service_started
     networks:
       - p3-network
     restart: unless-stopped
@@ -162,7 +166,7 @@ services:
     container_name: p3-pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@p3.local}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?error - PGADMIN_PASSWORD required}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-devpgadmin}
     ports:
       - "5050:80"
     networks:

@@ -23,6 +23,7 @@ export const LoginPage: React.FC = () => {
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("p3_userId", res.userId);
         localStorage.setItem("p3_username", res.username);
+        localStorage.setItem("p3_roles", JSON.stringify(res.roles ?? []));
       }
       navigate("/dashboard", { replace: true });
     } catch (err) {
@@ -45,7 +46,7 @@ export const LoginPage: React.FC = () => {
     >
       <h1 style={{ marginTop: 0 }}>Sign in</h1>
       <p style={{ color: "#555" }}>
-        Demo users: admin / admin123 · user1 / user123
+        Demo: admin/admin123 · alice/alice123 · bob/bob123 · carol/carol123 · dave/dave123
       </p>
       <form onSubmit={onSubmit}>
         <label style={{ display: "block", marginBottom: 8 }}>

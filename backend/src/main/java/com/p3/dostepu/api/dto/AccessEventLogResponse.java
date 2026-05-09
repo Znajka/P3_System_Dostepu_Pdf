@@ -47,6 +47,10 @@ public class AccessEventLogResponse {
     @JsonProperty("userId")
     private String userId;
 
+    /** Login name when the event is tied to a user row; absent for anonymous/system events. */
+    @JsonProperty("username")
+    private String username;
+
     @JsonProperty("documentId")
     private String documentId;
 

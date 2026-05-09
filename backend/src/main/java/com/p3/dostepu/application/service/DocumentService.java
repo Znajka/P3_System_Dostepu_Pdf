@@ -1,6 +1,5 @@
 package com.p3.dostepu.application.service;
 
-import java.io.ByteArrayInputStream;
 import java.util.Base64;
 import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +19,7 @@ import com.p3.dostepu.domain.repository.AccessEventLogRepository;
 import com.p3.dostepu.domain.repository.DocumentKeyMetadataRepository;
 import com.p3.dostepu.domain.repository.DocumentRepository;
 import com.p3.dostepu.infrastructure.encryption.KmsService;
+import com.p3.dostepu.application.util.DocumentTitles;
 import com.p3.dostepu.infrastructure.pdf.FastApiPdfClient;
 import com.p3.dostepu.infrastructure.storage.StorageService;
 import lombok.RequiredArgsConstructor;
@@ -71,23 +71,25 @@ public class DocumentService {
       FastApiPdfClient.EncryptionResponse encryptResponse = fastApiClient.encryptPdfDocument(
           documentId, pdfFile, dekBase64);
 
-      log.debug("Storing encrypted PDF blob: {}", documentId);
-      ByteArrayInputStream encryptedStream = new ByteArrayInputStream(
-          Base64.getDecoder().decode(encryptResponse.getCiphertext())
-      );
-      
-      String blobPath = storageService.storeEncryptedDocument(documentId,
-          pdfFile.getOriginalFilename(), encryptedStream, pdfFile.getSize());
-
-      Long blobSize = storageService.getBlobSize(blobPath);
+      // FastAPI persists ciphertext to shared volume; use returned path + size.
+      String blobPath = encryptResponse.getBlobPath();
+      if (blobPath == null || blobPath.isBlank()) {
+        throw new IllegalStateException("Encrypt service did not return blob_path");
+      }
+      Long blobSize = encryptResponse.getCiphertextSize();
+      if (blobSize == null || blobSize <= 0) {
+        blobSize = storageService.getBlobSize(blobPath);
+      }
 
       log.debug("Wrapping DEK with KMS master key: {}", documentId);
       KmsService.WrappedDekMetadata wrappedMetadata = kmsService.wrapDek(dek, documentId);
 
+      String storedTitle = DocumentTitles.fromOriginalFilename(pdfFile.getOriginalFilename());
+
       Document document = Document.builder()
           .id(documentId)
           .owner(owner)
-          .title(request.getTitle())
+          .title(storedTitle)
           .description(request.getDescription())
           .tags(request.getTags())
           .blobPath(blobPath)
@@ -117,8 +119,8 @@ public class DocumentService {
       keyMetadataRepository.save(keyMetadata);
       log.info("Persisted key metadata for document: {}", documentId);
 
-      auditLogService.logUpload(owner.getId(), documentId, blobSize, clientIp, null,
-          true, null);
+      auditLogService.logUpload(owner, documentId, document, blobSize, clientIp, null, true,
+          null);
 
       return DocumentUploadResponse.builder()
           .documentId(documentId)
@@ -129,9 +131,12 @@ public class DocumentService {
 
     } catch (Exception e) {
       log.error("Document upload failed: {}", documentId, e);
-      auditLogService.logUpload(owner.getId(), documentId, 0L, clientIp, null, false,
+      auditLogService.logUpload(owner, documentId, null, 0L, clientIp, null, false,
           e.getMessage());
-      throw e;
+      if (e instanceof RuntimeException re) {
+        throw re;
+      }
+      throw new RuntimeException(e);
     }
   }
 

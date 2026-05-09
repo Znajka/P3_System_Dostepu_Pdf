@@ -1,6 +1,11 @@
 spring:
   application:
     name: p3-dostepu-backend
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 104857600
+      max-request-size: 115343360
   jpa:
     hibernate:
       ddl-auto: validate
@@ -21,9 +26,13 @@ spring:
     caffeine:
       spec: maximumSize=10000,expireAfterWrite=1h
 
+server:
+  max-http-request-header-size: 65536
+
 app:
   jwt:
-    secret: ${APP_JWT_SECRET:}
+    # Must match FastAPI APP_JWT_SECRET (see docker-compose). Empty default breaks local mixed runs.
+    secret: "${APP_JWT_SECRET:dev-jwt-secret-min-32-chars-for-hs256-demo!!}"
     expiration-ms: ${APP_JWT_EXPIRATION_MS:3600000}
     refresh-token-expiration-ms: ${APP_REFRESH_TOKEN_EXPIRATION_MS:604800000}
   rate-limit:
@@ -41,9 +50,16 @@ app:
     expiration-notification-enabled: ${EXPIRATION_NOTIFICATION_ENABLED:false}
     expiration-notification-hours-before: ${EXPIRATION_NOTIFICATION_HOURS_BEFORE:24}
   security:
-    ip-pinning-enabled: ${APP_SECURITY_IP_PINNING_ENABLED:true}
+    # Prefer explicit true in prod; pinning breaks easily across ports (::1 vs 127.0.0.1, Docker gateways).
+    ip-pinning-enabled: ${APP_SECURITY_IP_PINNING_ENABLED:false}
   internal:
-    api-key: ${APP_INTERNAL_API_KEY:}
+    # Must match FastAPI APP_INTERNAL_API_KEY (docker-compose default: dev-p3-internal-api-key).
+    api-key: ${APP_INTERNAL_API_KEY:dev-p3-internal-api-key}
+
+fastapi:
+  service:
+    # Plain HTTP unless you terminate TLS elsewhere (internal docker network uses HTTP).
+    url: ${FASTAPI_SERVICE_URL:http://localhost:8443}
 
 logging:
   level:

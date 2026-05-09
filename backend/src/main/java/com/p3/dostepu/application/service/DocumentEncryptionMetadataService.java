@@ -42,8 +42,7 @@ public class DocumentEncryptionMetadataService {
 
     ZonedDateTime now = ZonedDateTime.now();
     boolean hasGrant = grantRepository
-        .findByDocumentIdAndGranteeUserIdAndRevokedFalseAndExpiresAtAfter(
-            documentId, user.getId(), now)
+        .findOpenWindowGrant(documentId, user.getId(), now)
         .isPresent();
     boolean isOwner = document.getOwner().getId().equals(user.getId());
     boolean isAdmin = user.getRoles().contains(UserRole.ADMIN);

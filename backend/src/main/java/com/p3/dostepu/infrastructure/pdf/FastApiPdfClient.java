@@ -1,14 +1,10 @@
 package com.p3.dostepu.infrastructure.pdf;
 
-import java.io.InputStream;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.ssl.DefaultSslBundleRegistry;
-import org.springframework.boot.ssl.SslBundle;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -34,7 +30,7 @@ public class FastApiPdfClient {
   private final RestTemplate restTemplate;
   private final ObjectMapper objectMapper;
 
-  @Value("${fastapi.service.url:https://fastapi-pdf-service:8443}")
+  @Value("${fastapi.service.url:http://localhost:8443}")
   private String fastApiUrl;
 
   /**
@@ -62,8 +58,8 @@ public class FastApiPdfClient {
       });
 
       HttpHeaders headers = new HttpHeaders();
-      headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-      headers.set("X-Service-ID", "spring-boot-backend"); // Service authentication
+      headers.set("X-Service-ID", "spring-boot-backend");
+      // Let FormHttpMessageConverter set multipart boundary (manual Content-Type breaks clients).
       HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
 
       log.info("Sending PDF to FastAPI for encryption: {} (size: {} bytes)", documentId,
@@ -76,14 +72,16 @@ public class FastApiPdfClient {
         JsonNode responseJson = objectMapper.readTree(response.getBody());
 
         EncryptionResponse encResponse = EncryptionResponse.builder()
-            .documentId(responseJson.get("document_id").asText())
-            .status(responseJson.get("status").asText())
-            .blobPath(responseJson.get("blob_path").asText())
-            .nonce(responseJson.get("nonce").asText())
-            .tag(responseJson.get("tag").asText())
-            .ciphertext(responseJson.get("ciphertext").asText())
-            .ciphertextSize(responseJson.get("ciphertext_size").asLong())
-            .algorithm(responseJson.get("algorithm").asText())
+            .documentId(responseJson.path("document_id").asText())
+            .status(responseJson.path("status").asText())
+            .blobPath(responseJson.path("blob_path").asText())
+            .nonce(responseJson.path("nonce").asText())
+            .tag(responseJson.path("tag").asText())
+            .ciphertextSize(
+                responseJson.hasNonNull("ciphertext_size")
+                    ? responseJson.get("ciphertext_size").asLong()
+                    : 0L)
+            .algorithm(responseJson.path("algorithm").asText("AES-256-GCM"))
             .build();
 
         log.info(
@@ -117,10 +115,10 @@ public class FastApiPdfClient {
   public static class EncryptionResponse {
     private String documentId;
     private String status;
+    /** Path on shared storage where FastAPI wrote the encrypted blob. */
     private String blobPath;
     private String nonce;
     private String tag;
-    private String ciphertext;
     private Long ciphertextSize;
     private String algorithm;
   }

@@ -29,6 +29,7 @@ public class RateLimitAspect {
       + "&& ("
       + "execution(* *.grantAccess(..)) || "
       + "execution(* *.revokeAccess(..)) || "
+      + "execution(* *.deleteGrantForDocument(..)) || "
       + "execution(* *.issueAccessTicket(..))"
       + ")")
   public void enforceRateLimit(JoinPoint joinPoint) {

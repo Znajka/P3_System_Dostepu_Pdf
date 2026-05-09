@@ -20,7 +20,6 @@ import com.p3.dostepu.domain.entity.User;
 import com.p3.dostepu.domain.repository.UserRepository;
 import com.p3.dostepu.security.CustomUserDetails;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -44,10 +43,8 @@ public class DocumentController {
 
   /**
    * POST /api/documents - Upload PDF document.
-   * Multipart request: file (PDF) + metadata (JSON).
-   * Returns 201 Created with document ID.
+   * Multipart: file (required). Title is derived from the file's original filename.
    *
-   * @param title document title (required)
    * @param description document description (optional)
    * @param tags document tags (optional)
    * @param file PDF file (required, multipart)
@@ -56,7 +53,6 @@ public class DocumentController {
   @PostMapping(consumes = "multipart/form-data")
   @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
   public ResponseEntity<?> uploadDocument(
-      @RequestParam(value = "title") String title,
       @RequestParam(value = "description", required = false) String description,
       @RequestParam(value = "tags", required = false) String[] tags,
       @RequestParam(value = "file") MultipartFile file,
@@ -71,9 +67,7 @@ public class DocumentController {
       User owner = userRepository.findById(userId)
           .orElseThrow(() -> new RuntimeException("User not found"));
 
-      // Build upload request
       DocumentUploadRequest request = DocumentUploadRequest.builder()
-          .title(title)
           .description(description)
           .tags(tags)
           .visibleTo("private")

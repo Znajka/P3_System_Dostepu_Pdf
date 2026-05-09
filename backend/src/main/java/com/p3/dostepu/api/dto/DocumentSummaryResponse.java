@@ -2,6 +2,7 @@ package com.p3.dostepu.api.dto;
 
 import java.time.ZonedDateTime;
 import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -14,6 +15,7 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class DocumentSummaryResponse {
 
   @JsonProperty("documentId")
@@ -27,4 +29,17 @@ public class DocumentSummaryResponse {
 
   @JsonProperty("createdAt")
   private ZonedDateTime createdAt;
+
+  /** Present for {@code scope=shared}: latest non-revoked grant for the current user. */
+  @JsonProperty("grantId")
+  private UUID grantId;
+
+  @JsonProperty("validFrom")
+  private ZonedDateTime validFrom;
+
+  @JsonProperty("expiresAt")
+  private ZonedDateTime expiresAt;
+
+  @JsonProperty("shareStatus")
+  private String shareStatus;
 }

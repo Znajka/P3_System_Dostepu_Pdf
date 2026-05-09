@@ -12,7 +12,6 @@ import lombok.Setter;
 
 /**
  * DTO for POST /documents/{id}/grant request.
- * Provide exactly one of: granteeUserId, granteeUsername, granteeEmail.
  */
 @Getter
 @Setter
@@ -21,14 +20,13 @@ import lombok.Setter;
 @Builder
 public class AccessGrantRequest {
 
-  @JsonProperty("granteeUserId")
-  private String granteeUserId;
-
+  @NotBlank
   @JsonProperty("granteeUsername")
   private String granteeUsername;
 
-  @JsonProperty("granteeEmail")
-  private String granteeEmail;
+  /** Start of access window (optional; defaults to now). */
+  @JsonProperty("validFrom")
+  private ZonedDateTime validFrom;
 
   @NotNull
   @JsonProperty("expiresAt")

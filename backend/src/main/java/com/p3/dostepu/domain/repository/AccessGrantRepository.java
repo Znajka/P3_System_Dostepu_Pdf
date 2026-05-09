@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -15,11 +16,29 @@ import com.p3.dostepu.domain.entity.AccessGrant;
  */
 @Repository
 public interface AccessGrantRepository extends JpaRepository<AccessGrant, UUID> {
+  Optional<AccessGrant> findByDocument_IdAndId(UUID documentId, UUID grantId);
+
+  Optional<AccessGrant> findFirstByDocument_IdAndGranteeUser_IdAndRevokedFalseOrderByCreatedAtDesc(
+      UUID documentId, UUID granteeUserId);
+
+
   /**
-   * Find active grant for a document and grantee (not revoked, not expired).
+   * Grantee may revoke a scheduled or current grant: not revoked and not past expiresAt.
    */
-  Optional<AccessGrant> findByDocumentIdAndGranteeUserIdAndRevokedFalseAndExpiresAtAfter(
-      UUID documentId, UUID granteeUserId, ZonedDateTime now);
+  @Query("SELECT ag FROM AccessGrant ag WHERE ag.document.id = :documentId "
+      + "AND ag.granteeUser.id = :granteeUserId AND ag.revoked = false "
+      + "AND ag.expiresAt > :now")
+  Optional<AccessGrant> findRevocableGrant(@Param("documentId") UUID documentId,
+      @Param("granteeUserId") UUID granteeUserId, @Param("now") ZonedDateTime now);
+
+  /**
+   * Open-ticket / viewer: not revoked, inside [validFrom, expiresAt).
+   */
+  @Query("SELECT ag FROM AccessGrant ag WHERE ag.document.id = :documentId "
+      + "AND ag.granteeUser.id = :granteeUserId AND ag.revoked = false "
+      + "AND ag.validFrom <= :now AND ag.expiresAt > :now")
+  Optional<AccessGrant> findOpenWindowGrant(@Param("documentId") UUID documentId,
+      @Param("granteeUserId") UUID granteeUserId, @Param("now") ZonedDateTime now);
 
   /**
    * Find all grants for a document (active and inactive).
@@ -39,6 +58,20 @@ public interface AccessGrantRepository extends JpaRepository<AccessGrant, UUID> 
       + "AND ag.expiresAt > :now")
   Integer countActiveGrants(@Param("documentId") UUID documentId,
       @Param("granteeUserId") UUID granteeUserId, @Param("now") ZonedDateTime now);
+
+  /**
+   * Revoke rows that are past {@code expiresAt} but still {@code revoked = false}.
+   * Needed because the DB unique index is only on {@code revoked}, so expired rows
+   * would otherwise block re-granting until the scheduled job runs.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query("UPDATE AccessGrant ag SET ag.revoked = true, ag.revokedAt = :now, "
+      + "ag.revokeReason = :reason WHERE ag.document.id = :documentId "
+      + "AND ag.granteeUser.id = :granteeUserId AND ag.revoked = false "
+      + "AND ag.expiresAt <= :now")
+  int revokeExpiredGrantsForDocumentAndGrantee(@Param("documentId") UUID documentId,
+      @Param("granteeUserId") UUID granteeUserId, @Param("now") ZonedDateTime now,
+      @Param("reason") String reason);
 
   /**
    * Find expired grants that have not been revoked.

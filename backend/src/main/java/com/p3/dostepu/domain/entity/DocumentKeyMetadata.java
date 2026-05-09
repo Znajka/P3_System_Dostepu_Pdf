@@ -3,6 +3,8 @@ package com.p3.dostepu.domain.entity;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -68,6 +70,7 @@ public class DocumentKeyMetadata {
   @Column(length = 50)
   private String kmsKeyVersion;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(columnDefinition = "jsonb")
   private String kmsMetadata;
 

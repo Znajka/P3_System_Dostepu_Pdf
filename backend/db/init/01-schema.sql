@@ -16,15 +16,6 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Enums for role-based access
 CREATE TYPE user_role AS ENUM ('ADMIN', 'USER');
-CREATE TYPE access_action AS ENUM (
-  'upload',
-  'grant',
-  'revoke',
-  'open_attempt',
-  'stream_start',
-  'stream_end'
-);
-CREATE TYPE access_result AS ENUM ('success', 'failure');
 
 -- ============================================================================
 -- USER table
@@ -38,13 +29,19 @@ CREATE TABLE "user" (
   username VARCHAR(255) NOT NULL UNIQUE,
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  roles user_role[] NOT NULL DEFAULT '{USER}'::user_role[],
   failed_attempts INTEGER NOT NULL DEFAULT 0,
   lock_until TIMESTAMP WITH TIME ZONE,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TIMESTAMP WITH TIME ZONE
+);
+
+-- JPA @ElementCollection for User.roles (join table expected by Hibernate)
+CREATE TABLE user_roles (
+  user_id UUID NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+  roles VARCHAR(50) NOT NULL,
+  PRIMARY KEY (user_id, roles)
 );
 
 CREATE INDEX idx_user_username ON "user"(username);
@@ -118,6 +115,7 @@ CREATE TABLE access_grant (
   document_id UUID NOT NULL REFERENCES document(id) ON DELETE RESTRICT,
   grantee_user_id UUID NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
   granted_by_user_id UUID NOT NULL REFERENCES "user"(id) ON DELETE RESTRICT,
+  valid_from TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   revoked BOOLEAN NOT NULL DEFAULT false,
   revoked_at TIMESTAMP WITH TIME ZONE,
@@ -126,7 +124,7 @@ CREATE TABLE access_grant (
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT no_self_grant CHECK (grantee_user_id != granted_by_user_id),
-  CONSTRAINT valid_expiry CHECK (expires_at > created_at)
+  CONSTRAINT valid_grant_window CHECK (expires_at > valid_from)
 );
 
 CREATE INDEX idx_access_grant_document_id ON access_grant(document_id);
@@ -151,9 +149,9 @@ CREATE TABLE access_event_log (
   timestamp_utc TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   user_id UUID REFERENCES "user"(id) ON DELETE SET NULL,
   document_id UUID REFERENCES document(id) ON DELETE SET NULL,
-  action access_action NOT NULL,
-  result access_result NOT NULL,
-  ip_address INET,
+  action VARCHAR(32) NOT NULL,
+  result VARCHAR(16) NOT NULL,
+  ip_address VARCHAR(64),
   user_agent VARCHAR(512),
   reason VARCHAR(255),
   metadata JSONB,
@@ -187,7 +185,7 @@ CREATE TABLE session_token (
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   revoked BOOLEAN NOT NULL DEFAULT false,
   revoked_at TIMESTAMP WITH TIME ZONE,
-  ip_address INET,
+  ip_address VARCHAR(64),
   user_agent VARCHAR(512),
   jti VARCHAR(255) UNIQUE,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -262,6 +260,7 @@ FROM access_grant ag
 JOIN document d ON ag.document_id = d.id
 JOIN "user" u ON ag.grantee_user_id = u.id
 WHERE ag.revoked = false
+  AND ag.valid_from <= CURRENT_TIMESTAMP
   AND ag.expires_at > CURRENT_TIMESTAMP
   AND d.deleted_at IS NULL;
 
@@ -475,24 +474,19 @@ COMMENT ON FUNCTION increment_failed_attempts IS
 -- ============================================================================
 -- Simple accounts for local demo/testing.
 -- Passwords are hashed with bcrypt via pgcrypto.
-INSERT INTO "user" (username, email, password_hash, roles, active)
+INSERT INTO "user" (username, email, password_hash, active)
 VALUES
-  ('admin', 'admin@p3.local', crypt('admin123', gen_salt('bf', 12)), '{ADMIN}'::user_role[], true),
-  ('owner1', 'owner1@p3.local', crypt('owner123', gen_salt('bf', 12)), '{USER}'::user_role[], true),
-  ('owner2', 'owner2@p3.local', crypt('owner123', gen_salt('bf', 12)), '{USER}'::user_role[], true),
-  ('owner3', 'owner3@p3.local', crypt('owner123', gen_salt('bf', 12)), '{USER}'::user_role[], true),
-  ('user1', 'user1@p3.local', crypt('user123', gen_salt('bf', 12)), '{USER}'::user_role[], true),
-  ('user2', 'user2@p3.local', crypt('user123', gen_salt('bf', 12)), '{USER}'::user_role[], true),
-  ('user3', 'user3@p3.local', crypt('user123', gen_salt('bf', 12)), '{USER}'::user_role[], true)
+  ('admin', 'admin@p3.local', crypt('admin123', gen_salt('bf', 12)), true),
+  ('alice', 'alice@p3.local', crypt('alice123', gen_salt('bf', 12)), true),
+  ('bob', 'bob@p3.local', crypt('bob123', gen_salt('bf', 12)), true),
+  ('carol', 'carol@p3.local', crypt('carol123', gen_salt('bf', 12)), true),
+  ('dave', 'dave@p3.local', crypt('dave123', gen_salt('bf', 12)), true)
 ON CONFLICT (username) DO NOTHING;
 
--- Seed role mappings used by JPA @ElementCollection table.
 INSERT INTO user_roles (user_id, roles)
 SELECT id, 'ADMIN' FROM "user" WHERE username = 'admin'
 ON CONFLICT DO NOTHING;
 INSERT INTO user_roles (user_id, roles)
-SELECT id, 'USER' FROM "user" WHERE username IN ('owner1', 'owner2', 'owner3')
-ON CONFLICT DO NOTHING;
-INSERT INTO user_roles (user_id, roles)
-SELECT id, 'USER' FROM "user" WHERE username IN ('user1', 'user2', 'user3')
+SELECT id, 'USER' FROM "user"
+WHERE username IN ('alice', 'bob', 'carol', 'dave')
 ON CONFLICT DO NOTHING;

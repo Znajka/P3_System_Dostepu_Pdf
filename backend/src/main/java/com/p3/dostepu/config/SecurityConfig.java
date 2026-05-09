@@ -119,6 +119,12 @@ public class SecurityConfig {
                 .hasAnyRole("ADMIN", "USER")
             .requestMatchers(HttpMethod.POST, "/api/documents/*/revoke")
                 .hasAnyRole("ADMIN", "USER")
+            .requestMatchers(HttpMethod.DELETE, "/api/documents/*/grants/*")
+                .hasAnyRole("ADMIN", "USER")
+            .requestMatchers(HttpMethod.POST, "/api/grants/*/revoke")
+                .hasAnyRole("ADMIN", "USER")
+            // Browser proxies PDF stream through Spring so ticket IP pinning matches issuance.
+            .requestMatchers(HttpMethod.GET, "/api/stream/pdf").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/internal/documents/*/encryption-metadata")
                 .hasAnyRole("ADMIN", "USER")
             // Document access: any authenticated user with valid grant

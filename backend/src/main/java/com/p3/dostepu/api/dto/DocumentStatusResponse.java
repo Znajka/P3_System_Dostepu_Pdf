@@ -54,11 +54,22 @@ public class DocumentStatusResponse {
   @AllArgsConstructor
   @Builder
   public static class AccessInfo {
+    /** Grant row id (for grantee self-removal when expired). */
+    @JsonProperty("grantId")
+    private String grantId;
+
     @JsonProperty("granteeUserId")
     private String granteeUserId;
 
+    @JsonProperty("validFrom")
+    private ZonedDateTime validFrom;
+
     @JsonProperty("expiresAt")
     private ZonedDateTime expiresAt;
+
+    /** PENDING, ACTIVE, EXPIRED (revoked rows are not returned here). */
+    @JsonProperty("shareStatus")
+    private String shareStatus;
   }
 
   @Getter
@@ -73,10 +84,23 @@ public class DocumentStatusResponse {
     @JsonProperty("granteeUserId")
     private String granteeUserId;
 
+    @JsonProperty("granteeUsername")
+    private String granteeUsername;
+
+    @JsonProperty("granteeEmail")
+    private String granteeEmail;
+
+    @JsonProperty("validFrom")
+    private ZonedDateTime validFrom;
+
     @JsonProperty("expiresAt")
     private ZonedDateTime expiresAt;
 
     @JsonProperty("revoked")
     private Boolean revoked;
+
+    /** PENDING = before validFrom; ACTIVE = in window; EXPIRED = past expiresAt; REVOKED = revoked flag. */
+    @JsonProperty("shareStatus")
+    private String shareStatus;
   }
 }

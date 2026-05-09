@@ -4,8 +4,7 @@ import java.time.ZonedDateTime;
 import java.util.UUID;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
+import jakarta.persistence.Convert;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -23,6 +22,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import com.p3.dostepu.domain.converter.AccessActionAttributeConverter;
+import com.p3.dostepu.domain.converter.AccessResultAttributeConverter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * AccessEventLog entity: APPEND-ONLY audit log recording all security-relevant
@@ -63,16 +66,16 @@ public class AccessEventLog {
   private Document document;
 
   @NotNull
-  @Enumerated(EnumType.STRING)
-  @Column(nullable = false, updatable = false)
+  @Convert(converter = AccessActionAttributeConverter.class)
+  @Column(nullable = false, updatable = false, length = 32)
   private AccessAction action;
 
   @NotNull
-  @Enumerated(EnumType.STRING)
-  @Column(nullable = false, updatable = false)
+  @Convert(converter = AccessResultAttributeConverter.class)
+  @Column(nullable = false, updatable = false, length = 16)
   private AccessResult result;
 
-  @Column(name = "ip_address", columnDefinition = "inet")
+  @Column(name = "ip_address", length = 64)
   private String ipAddress;
 
   @Column(length = 512, updatable = false)
@@ -81,6 +84,7 @@ public class AccessEventLog {
   @Column(length = 255, updatable = false)
   private String reason;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(columnDefinition = "jsonb", updatable = false)
   private String metadata;
 
