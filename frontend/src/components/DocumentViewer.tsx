@@ -102,9 +102,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ accessToken }) =
     loadDocument();
   }, [documentId, accessToken]);
 
-  const handleStreamError = (streamErr: StreamingError) => {
+  const handleStreamError = useCallback((streamErr: StreamingError) => {
     setError(streamErr.message);
-  };
+  }, []);
 
   /** Re-validates grant with Spring Boot (call before PDF password unlock and on each page/zoom). */
   const verifyDocumentAccess = useCallback(async (): Promise<boolean> => {

@@ -105,6 +105,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   verifyDocumentAccess,
   onDocumentAccessLost,
 }) => {
+  /** Keep latest handler without re-running PDF load effect (parent re-renders after status polling/checks). */
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -179,7 +183,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     const master = masterPdfBufferRef.current;
     if (!master || master.byteLength === 0) {
       setError("Invalid PDF data");
-      onError?.({
+      onErrorRef.current?.({
         code: "INVALID_PDF",
         message: "PDF data is empty or invalid",
       });
@@ -257,7 +261,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           err instanceof Error ? err.message : "Failed to load PDF";
         setError(errorMsg);
         setNeedPasswordPrompt(false);
-        onError?.({
+        onErrorRef.current?.({
           code: "PDF_LOAD_ERROR",
           message: errorMsg,
         });
@@ -276,7 +280,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       pdfDocRef.current = null;
       void d?.destroy();
     };
-  }, [pdfData, pdfOwnerPassword, onError]);
+    // Intentionally omit onError: stable via onErrorRef so parent re-renders (e.g. setDocStatus on access check)
+    // do not destroy and reload PDF.js — that caused "transport destroyed" on page change.
+  }, [pdfData, pdfOwnerPassword]);
 
   /**
    * Re-check grant/access with Spring Boot before continuing (password unlock or navigation).
@@ -375,7 +381,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Failed to render page";
       setError(errorMsg);
-      onError?.({
+      onErrorRef.current?.({
         code: "RENDER_ERROR",
         message: errorMsg,
       });
